@@ -63,6 +63,83 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
   const [gender, setGender] = useState("Male");
   const [facilityId, setFacilityId] = useState(facilities[0]?.id || "fac-1");
   const [symptoms, setSymptoms] = useState("");
+
+  const getTicketQueueDetails = (ticket: Patient) => {
+    const facId = ticket.facilityId;
+    const activeDocs = doctors.filter(
+      d => d.facilityId === facId && d.attendance.clockIn !== null && d.attendance.clockOut === null
+    );
+    const activeDocsCount = activeDocs.length;
+
+    // Filter all patients at the same facility who are still waiting (status === "OPD_Pending")
+    const waitingPatients = patients.filter(
+      p => p.facilityId === facId && p.status === "OPD_Pending"
+    );
+
+    // Sort by ticketNumber to get a stable queue order
+    const sortedWaiting = [...waitingPatients].sort((a, b) => a.ticketNumber.localeCompare(b.ticketNumber));
+
+    // Find the index of this ticket in the waiting queue
+    const index = sortedWaiting.findIndex(p => p.id === ticket.id);
+    const positionInQueue = index >= 0 ? index + 1 : 0; // 1-based index
+
+    const avgConsultationMinutes = 10;
+    let estWaitMinutes = 0;
+    if (positionInQueue > 0) {
+      if (activeDocsCount > 0) {
+        estWaitMinutes = Math.ceil(((positionInQueue - 1) * avgConsultationMinutes) / activeDocsCount);
+      } else {
+        estWaitMinutes = positionInQueue * 20;
+      }
+    }
+
+    const arrivalOffsetMinutes = Math.max(5, estWaitMinutes - 10);
+    const now = new Date();
+    const recommendedArrivalTime = new Date(now.getTime() + arrivalOffsetMinutes * 60000);
+    const formattedArrival = recommendedArrivalTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    return {
+      position: positionInQueue,
+      totalInQueue: waitingPatients.length,
+      activeDocsCount,
+      estimatedWaitMinutes: estWaitMinutes,
+      arrivalOffsetMinutes,
+      formattedArrival
+    };
+  };
+
+  const getFacilityQueueDetails = (targetFacilityId: string) => {
+    const activeDocs = doctors.filter(
+      d => d.facilityId === targetFacilityId && d.attendance.clockIn !== null && d.attendance.clockOut === null
+    );
+    const activeDocsCount = activeDocs.length;
+
+    const waitingPatients = patients.filter(
+      p => p.facilityId === targetFacilityId && p.status === "OPD_Pending"
+    );
+    const queueSize = waitingPatients.length;
+
+    const avgConsultationMinutes = 10;
+    let estWaitMinutes = 0;
+    if (activeDocsCount > 0) {
+      estWaitMinutes = Math.ceil((queueSize * avgConsultationMinutes) / activeDocsCount);
+    } else {
+      estWaitMinutes = (queueSize + 1) * 20;
+    }
+
+    const arrivalOffsetMinutes = Math.max(5, estWaitMinutes - 15);
+    const now = new Date();
+    const recommendedArrivalTime = new Date(now.getTime() + arrivalOffsetMinutes * 60000);
+    const formattedArrival = recommendedArrivalTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    return {
+      queueSize,
+      activeDocsCount,
+      estimatedWaitMinutes: estWaitMinutes,
+      arrivalOffsetMinutes,
+      formattedArrival
+    };
+  };
   
   // Simulated Voice Input State
   const [showMicModal, setShowMicModal] = useState(false);
@@ -423,12 +500,13 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
 
   // Pre-configured diagnostic tests list present in each facility
   const availableTests = [
-    { name: "Complete Blood Count (CBC)", dept: "Pathology", charge: "₹50 (Free under scheme)" },
-    { name: "Rapid Dengue & Malaria Antigen", dept: "Microbiology", charge: "₹100 (Free under scheme)" },
-    { name: "Blood Glucose (HbA1c)", dept: "Biochemistry", charge: "₹40 (Free under scheme)" },
-    { name: "Chest X-Ray", dept: "Radiology", charge: "₹150 (Free under scheme)" },
-    { name: "Maternity Obstetric Ultrasound", dept: "Radiology", charge: "₹250 (Free under scheme)" },
-    { name: "Widal Test (Typhoid)", dept: "Pathology", charge: "₹60 (Free under scheme)" }
+    { id: "cbc", name: "Complete Blood Count (CBC)", dept: "Pathology", charge: "₹50 (Free under scheme)" },
+    { id: "lft", name: "Liver Function Test (LFT)", dept: "Biochemistry", charge: "₹150 (Free under scheme)" },
+    { id: "kft", name: "Kidney Function Test (KFT)", dept: "Biochemistry", charge: "₹150 (Free under scheme)" },
+    { id: "dengue", name: "Dengue NS1 Antigen Test", dept: "Microbiology", charge: "₹100 (Free under scheme)" },
+    { id: "malaria", name: "Malaria Smear Test", dept: "Microbiology", charge: "₹100 (Free under scheme)" },
+    { id: "sugar", name: "Blood Sugar (HbA1c)", dept: "Biochemistry", charge: "₹40 (Free under scheme)" },
+    { id: "ultrasound", name: "Maternity Obstetric Ultrasound", dept: "Radiology", charge: "₹250 (Free under scheme)" }
   ];
 
   const closestFacility = facilities[0] || { name: "Central CHC", distance: 0 };
@@ -619,6 +697,55 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                   <p className="text-xs text-slate-700 italic">{newTicketResult.aiInsights}</p>
                 </div>
               </div>
+
+              {/* Smart Arrival & Queue Slot Forecast */}
+              {(() => {
+                const qDetails = getTicketQueueDetails(newTicketResult.patient);
+                
+                const arrivalTitle = language === "hi" 
+                  ? "स्मार्ट आगमन एवं कतार स्लॉट" 
+                  : language === "mr" 
+                  ? "स्मार्ट आगमन आणि रांग स्लॉट" 
+                  : "Smart Arrival & Queue Details";
+
+                const turnText = language === "hi"
+                  ? `आपकी कतार संख्या: #${qDetails.position} (कुल कतार आकार: ${qDetails.totalInQueue})`
+                  : language === "mr"
+                  ? `तुमची रांग क्रमांक: #${qDetails.position} (एकूण रांग आकार: ${qDetails.totalInQueue})`
+                  : `Your Queue Position: #${qDetails.position} (Total Waiting: ${qDetails.totalInQueue})`;
+
+                const waitEstimateText = language === "hi"
+                  ? `डॉक्टर परामर्श के लिए अनुमानित प्रतीक्षा समय: ~${qDetails.estimatedWaitMinutes} मिनट`
+                  : language === "mr"
+                  ? `डॉक्टर सल्लामसलत करण्यासाठी अंदाजित प्रतीक्षा वेळ: ~${qDetails.estimatedWaitMinutes} मिनिटे`
+                  : `Estimated Time to See Doctor: ~${qDetails.estimatedWaitMinutes} mins`;
+
+                const rushPreventionAdvice = language === "hi"
+                  ? `भीड़-भाड़ से बचने के लिए, कृपया अस्पताल/क्लीनिक में ${qDetails.formattedArrival} बजे तक पहुँचें।`
+                  : language === "mr"
+                  ? `गर्दी टाळण्यासाठी, कृपया रुग्णालय/क्लिनिकमध्ये ${qDetails.formattedArrival} वाजेपर्यंत पोहोचा.`
+                  : `To minimize waiting room congestion and avoid long lines, please arrive at the facility by ${qDetails.formattedArrival}.`;
+
+                return (
+                  <div className="mt-4 pt-3 border-t border-slate-100 space-y-2">
+                    <span className="text-xs font-bold text-teal-700 uppercase tracking-wide block">
+                      ⏰ {arrivalTitle}
+                    </span>
+                    <div className="bg-teal-50/50 border border-teal-100 rounded-xl p-3 space-y-1.5 text-left font-sans">
+                      <p className="text-xs font-bold text-teal-900 flex items-center gap-1.5">
+                        <span className="h-1.5 w-1.5 rounded-full bg-teal-500 animate-pulse shrink-0"></span>
+                        {turnText}
+                      </p>
+                      <p className="text-[11px] text-slate-700 font-medium leading-normal">
+                        ⏱ {waitEstimateText}
+                      </p>
+                      <p className="text-[11px] text-slate-600 bg-white border border-teal-50 rounded-lg p-2 leading-relaxed">
+                        💡 <strong>Crowd Control Arrival Time:</strong> {rushPreventionAdvice}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <button
@@ -689,20 +816,86 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
               </div>
 
               {/* Hospital Location Selection */}
-              <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t.selectPHC}</label>
-                <select
-                  id="booking-facility-select"
-                  value={facilityId}
-                  onChange={(e) => setFacilityId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition cursor-pointer font-medium"
-                >
-                  {facilities.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name} {f.type === "CHC" ? "(District Hub)" : `(PHC, ${f.distance}km)`}
-                    </option>
-                  ))}
-                </select>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">{t.selectPHC}</label>
+                  <select
+                    id="booking-facility-select"
+                    value={facilityId}
+                    onChange={(e) => setFacilityId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 outline-none focus:border-indigo-500 focus:bg-white transition cursor-pointer font-medium"
+                  >
+                    {facilities.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.name} {f.type === "CHC" ? "(District Hub)" : `(PHC, ${f.distance}km)`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Smart Arrival Advisory & Queue Forecast */}
+                {(() => {
+                  const details = getFacilityQueueDetails(facilityId);
+                  const selectedFacName = facilities.find(f => f.id === facilityId)?.name || "Clinic";
+                  
+                  const headerText = language === "hi" ? "लाइव कतार एवं आगमन पूर्वानुमान" : language === "mr" ? "थेट रांग आणि आगमन अंदाज" : "Live Queue & Arrival Forecast";
+                  const docsText = language === "hi" ? "ऑन-ड्यूटी डॉक्टर" : language === "mr" ? "ऑन-ड्यूटी डॉक्टर" : "On-Duty Doctors";
+                  const waitingText = language === "hi" ? "कतार में मरीज" : language === "mr" ? "रांगेत रुग्ण" : "Patients in Queue";
+                  const waitTimeText = language === "hi" ? "अनुमानित प्रतीक्षा" : language === "mr" ? "अंदाजित प्रतीक्षा" : "Est. Wait Time";
+                  const smartArrivalText = language === "hi" ? "स्मार्ट आगमन सलाह (भीड़ नियंत्रण)" : language === "mr" ? "स्मार्ट आगमन सल्ला (गर्दी नियंत्रण)" : "Smart Arrival Advisory (Crowd Control)";
+                  
+                  const adviceText = language === "hi"
+                    ? `ओपीडी में लंबी कतारों और भीड़ से बचने के लिए, कृपया ${details.formattedArrival} बजे (अगले ${details.arrivalOffsetMinutes} मिनट में) पहुँचें।`
+                    : language === "mr"
+                    ? `ओपीडीमध्ये लांब रांगा आणि गर्दी टाळण्यासाठी, कृपया ${details.formattedArrival} वाजता (पुढील ${details.arrivalOffsetMinutes} मिनिटांत) पोहोचा.`
+                    : `To bypass unnecessary crowding and waiting outside the OPD, we recommend arriving at ${selectedFacName} by ${details.formattedArrival} (in approx. ${details.arrivalOffsetMinutes} mins).`;
+
+                  return (
+                    <div className="bg-gradient-to-r from-indigo-50/60 to-teal-50/40 border border-indigo-100 rounded-xl p-4 space-y-3 font-sans animate-fadeIn">
+                      <div className="flex justify-between items-center pb-2 border-b border-indigo-50">
+                        <div className="flex items-center gap-2">
+                          <Clock className="h-4 w-4 text-indigo-600 animate-pulse" />
+                          <span className="font-extrabold text-[11px] text-indigo-900 uppercase tracking-wider">
+                            {headerText}
+                          </span>
+                        </div>
+                        <span className="flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                          <span className="text-[9px] font-mono font-bold text-emerald-700 uppercase">Live OPD Feed</span>
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="bg-white/80 p-2 rounded-lg border border-indigo-50">
+                          <span className="text-[9px] text-slate-400 block uppercase font-bold">{docsText}</span>
+                          <span className="text-sm font-black text-slate-800">{details.activeDocsCount}</span>
+                        </div>
+                        <div className="bg-white/80 p-2 rounded-lg border border-indigo-50">
+                          <span className="text-[9px] text-slate-400 block uppercase font-bold">{waitingText}</span>
+                          <span className="text-sm font-black text-indigo-600">{details.queueSize}</span>
+                        </div>
+                        <div className="bg-white/80 p-2 rounded-lg border border-indigo-50">
+                          <span className="text-[9px] text-slate-400 block uppercase font-bold">{waitTimeText}</span>
+                          <span className="text-sm font-black text-rose-600">~{details.estimatedWaitMinutes}m</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-indigo-100 rounded-lg p-2.5 flex items-start gap-2.5">
+                        <span className="bg-indigo-100 text-indigo-700 text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase shrink-0 mt-0.5 font-mono">
+                          RECOMMENDED ARRIVAL
+                        </span>
+                        <div>
+                          <span className="text-[10px] font-extrabold text-slate-700 block mb-0.5">
+                            {smartArrivalText}
+                          </span>
+                          <p className="text-[11px] leading-relaxed text-slate-600 font-medium">
+                            {adviceText}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Symptoms Input and Speech trigger */}
@@ -980,6 +1173,56 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                       </div>
                     </div>
 
+                    {/* Live Turn & Waiting Time Indicators */}
+                    {!isSeen && (
+                      <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-2.5 space-y-1.5 text-xs text-left">
+                        {(() => {
+                          const qDetails = getTicketQueueDetails(ticket);
+                          
+                          const positionLabel = language === "hi" 
+                            ? `आपकी कतार संख्या (OPD Queue):` 
+                            : language === "mr" 
+                            ? `तुमची रांग क्रमांक (OPD Queue):` 
+                            : "Your Queue Number:";
+
+                          const waitTimeLabel = language === "hi"
+                            ? `अनुमानित प्रतीक्षा समय:`
+                            : language === "mr"
+                            ? `अंदाजित प्रतीक्षा वेळ:`
+                            : "Est. Wait to Turn:";
+
+                          const crowdLabel = language === "hi"
+                            ? `प्रस्तावित आगमन समय:`
+                            : language === "mr"
+                            ? `सुचविलेले आगमन वेळ:`
+                            : "Advised Arrival:";
+
+                          return (
+                            <>
+                              <div className="flex justify-between items-center text-[11px]">
+                                <span className="text-slate-500 font-bold">{positionLabel}</span>
+                                <span className="font-black text-indigo-700 bg-indigo-100/80 px-1.5 py-0.5 rounded font-mono">
+                                  #{qDetails.position} of {qDetails.totalInQueue}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center text-[11px]">
+                                <span className="text-slate-500 font-bold">{waitTimeLabel}</span>
+                                <span className="font-bold text-rose-600 font-mono">
+                                  ~{qDetails.estimatedWaitMinutes} mins
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center pt-1 border-t border-indigo-50 text-[10px]">
+                                <span className="text-slate-400 uppercase font-bold tracking-wider">{crowdLabel}</span>
+                                <span className="font-extrabold text-teal-700 bg-white px-2 py-0.5 border border-teal-100 rounded shadow-2xs font-mono">
+                                  {qDetails.formattedArrival}
+                                </span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+
                     {/* QR Code Check-In Section */}
                     {!isSeen && (
                       <div className="mt-3 pt-3 border-t border-dashed border-slate-200">
@@ -1048,20 +1291,57 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
           </div>
 
           <div className="space-y-2.5">
-            {availableTests.map((test, idx) => (
-              <div key={idx} className="flex justify-between items-center p-3 rounded-xl border border-slate-100 hover:border-slate-150 transition text-xs font-sans">
-                <div>
-                  <span className="font-bold text-slate-800 block">{test.name}</span>
-                  <span className="text-[10px] text-slate-400 font-mono">Department: {test.dept}</span>
+            {availableTests.map((test, idx) => {
+              const liveTest = selectedFacility?.labInvestigations?.[test.id];
+
+              return (
+                <div key={idx} className="flex justify-between items-center p-3 rounded-xl border border-slate-100 hover:border-slate-150 transition text-xs font-sans">
+                  <div>
+                    <span className="font-bold text-slate-800 block">{test.name}</span>
+                    <span className="text-[10px] text-slate-400 font-mono">Department: {test.dept}</span>
+                  </div>
+                  <div className="text-right shrink-0 flex flex-col items-end">
+                    <span className="text-[10px] font-bold text-indigo-600 block">{test.charge}</span>
+                    {(() => {
+                      if (!liveTest) {
+                        return (
+                          <span className="text-[9px] text-slate-400 font-semibold bg-slate-50 px-1.5 py-0.5 rounded border border-slate-100 inline-block mt-1">
+                            ✓ Available
+                          </span>
+                        );
+                      }
+
+                      if (liveTest.status === "Available") {
+                        return (
+                          <span className="text-[9px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 inline-block mt-1 animate-fadeIn">
+                            ✓ Available
+                          </span>
+                        );
+                      } else if (liveTest.status === "Limited Slots") {
+                        return (
+                          <span className="text-[9px] text-amber-600 font-semibold bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 inline-block mt-1 animate-fadeIn">
+                            ⚠ Limited Slots
+                          </span>
+                        );
+                      } else {
+                        return (
+                          <div className="flex flex-col items-end gap-1 mt-1">
+                            <span className="text-[9px] text-rose-600 font-bold bg-rose-50 px-1.5 py-0.5 rounded border border-rose-150 inline-block uppercase font-mono">
+                              🚫 {liveTest.status}
+                            </span>
+                            {liveTest.expectedAvailabilityTime && (
+                              <span className="text-[8px] text-indigo-700 font-black font-mono bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 block max-w-[170px] text-right">
+                                ⏳ AI Forecast: {liveTest.expectedAvailabilityTime}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      }
+                    })()}
+                  </div>
                 </div>
-                <div className="text-right shrink-0">
-                  <span className="text-[10px] font-bold text-indigo-600 block">{test.charge}</span>
-                  <span className="text-[9px] text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 inline-block mt-1">
-                    ✓ Available
-                  </span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

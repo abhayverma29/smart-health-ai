@@ -58,12 +58,249 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Active facility focus for logistics grid view
   const [selectedFacilityId, setSelectedFacilityId] = useState<string>("all");
 
+  // Dynamic Live State Management
+  const [localFacilities, setLocalFacilities] = useState<Facility[]>(facilities);
+  const [localProcurements, setLocalProcurements] = useState<any[]>([]);
+  const [localDistrictStore, setLocalDistrictStore] = useState<Record<string, number>>({});
+  const [replenishingId, setReplenishingId] = useState<string | null>(null);
+
+  // Lab parameters inline editing state
+  const [editingLabTest, setEditingLabTest] = useState<{ facilityId: string; testId: string } | null>(null);
+  const [editLabStatus, setEditLabStatus] = useState("Available");
+  const [editMachineStatus, setEditMachineStatus] = useState("Operational");
+  const [editReagent, setEditReagent] = useState("Adequate");
+  const [editSamples, setEditSamples] = useState(5);
+  const [savingLab, setSavingLab] = useState(false);
+
+  // Procurement creation state
+  const [procureFacilityId, setProcureFacilityId] = useState("");
+  const [procureMedId, setProcureMedId] = useState("");
+  const [procureQty, setProcureQty] = useState(250);
+  const [procureIsCritical, setProcureIsCritical] = useState(false);
+  const [procuring, setProcuring] = useState(false);
+
+  const refreshLocalState = async () => {
+    try {
+      const res = await fetch("/api/state");
+      const data = await res.json();
+      if (data) {
+        setLocalFacilities(data.facilities || facilities);
+        setLocalProcurements(data.procurementOrders || []);
+        setLocalDistrictStore(data.districtStore || {});
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   useEffect(() => {
-    // Auto-fetch analytics once on component load if null
+    refreshLocalState();
     if (!analyticsData) {
       onRefreshAnalytics();
     }
-  }, []);
+  }, [facilities]);
+
+  const handleReplenishCritical = async (facilityId: string, drugId: string, qty: number) => {
+    setReplenishingId(`${facilityId}-${drugId}`);
+    try {
+      const res = await fetch("/api/admin/replenish-critical", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ facilityId, drugId, qty })
+      });
+      const data = await res.json();
+      if (data.success) {
+        refreshLocalState();
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("Replenishment Completed", {
+            body: data.message,
+          });
+        }
+      } else {
+        window.alert(data.error || "Replenishment failed.");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setReplenishingId(null);
+    }
+  };
+
+  const handleCreateProcurement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!procureFacilityId || !procureMedId || !procureQty) return;
+    setProcuring(true);
+    try {
+      const res = await fetch("/api/admin/create-procurement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          facilityId: procureFacilityId,
+          medicineId: procureMedId,
+          quantity: Number(procureQty),
+          isCritical: procureIsCritical
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        refreshLocalState();
+        setProcureMedId("");
+        setProcureQty(250);
+        setProcureIsCritical(false);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setProcuring(false);
+    }
+  };
+
+  const handleUpdateProcurement = async (orderId: string, status: string) => {
+    try {
+      const res = await fetch("/api/admin/update-procurement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId, status })
+      });
+      const data = await res.json();
+      if (data.success) {
+        refreshLocalState();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleSaveLabStatus = async () => {
+    if (!editingLabTest) return;
+    setSavingLab(true);
+    try {
+      const res = await fetch("/api/admin/update-lab-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          facilityId: editingLabTest.facilityId,
+          testId: editingLabTest.testId,
+          status: editLabStatus,
+          machineStatus: editMachineStatus,
+          reagentAvailability: editReagent,
+          pendingSamples: Number(editSamples)
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        refreshLocalState();
+        setEditingLabTest(null);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingLab(false);
+    }
+  };
+
+  // State and Handlers for Admin Direct Supply Chain Optimization Hub
+  const [actioningId, setActioningId] = useState<string | null>(null);
+
+  const handleDispatchFromStore = async (facilityId: string, medicineId: string, qty: number) => {
+    setActioningId(`${facilityId}-${medicineId}-dispatch`);
+    try {
+      const res = await fetch("/api/admin/dispatch-from-store", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ facilityId, medicineId, quantity: qty })
+      });
+      const data = await res.json();
+      if (data.success) {
+        refreshLocalState();
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("Supply Dispatched", {
+            body: data.message,
+          });
+        }
+      } else {
+        window.alert(data.error || "Store dispatch failed.");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  const handleDirectPurchase = async (facilityId: string, medicineId: string, qty: number) => {
+    setActioningId(`${facilityId}-${medicineId}-purchase`);
+    try {
+      const res = await fetch("/api/admin/direct-purchase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ facilityId, medicineId, quantity: qty })
+      });
+      const data = await res.json();
+      if (data.success) {
+        refreshLocalState();
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("Direct Purchase Complete", {
+            body: data.message,
+          });
+        }
+      } else {
+        window.alert(data.error || "Direct purchase failed.");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  const handleExportCSV = () => {
+    let csv = "MED-INTEL CONNECT - DISTRICT HEALTH & SUPPLY CHAIN ANALYTICS\n";
+    csv += `Generated: ${new Date().toLocaleString()}\n`;
+    csv += `District Health Index: ${analyticsData?.districtHealthIndex || 72}/100\n\n`;
+
+    csv += "--- DISTRICT CLINICAL BED OCCUPANCY ---\n";
+    csv += "Facility,Total Beds,Occupied Beds,Occupancy Rate (%)\n";
+    localFacilities.forEach(f => {
+      const fList = beds[f.id] || [];
+      const total = fList.reduce((sum, b) => sum + b.total, 0);
+      const occupied = fList.reduce((sum, b) => sum + b.occupied, 0);
+      csv += `"${f.name}",${total},${occupied},${Math.round((occupied/total)*100) || 0}%\n`;
+    });
+    csv += "\n";
+
+    csv += "--- CRITICAL LIFE SAVING DRUGS (CRITICAL DRUG STOCK) ---\n";
+    csv += "Facility,Critical Drug Name,Current Stock,Minimum Threshold,Estimated Remaining Days,Expiry Date,Batch,Supplier\n";
+    localFacilities.forEach(f => {
+      if (f.criticalInventory) {
+        Object.values(f.criticalInventory).forEach((drug: any) => {
+          csv += `"${f.name}","${drug.name}",${drug.stock},${drug.minThreshold},${drug.estimatedRemainingDays},"${drug.expiryDate}","${drug.batchNumber}","${drug.supplier}"\n`;
+        });
+      }
+    });
+    csv += "\n";
+
+    csv += "--- CLINICAL WORKFORCE LOGS ---\n";
+    csv += "Doctor,Specialization,Shift,Clock In,WiFi Verified\n";
+    doctors.forEach(doc => {
+      const f = localFacilities.find(fac => fac.id === doc.facilityId);
+      csv += `"${doc.name}","${doc.specialty}","${f?.name || "N/A"}",${doc.attendance.clockIn || "Absent"},${doc.attendance.wifiVerified ? "Yes" : "No"}\n`;
+    });
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `District_Health_Analytics_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportPDFMock = () => {
+    window.print();
+  };
 
   // Compute live local metrics to complement AI predictions
   const totalBeds = (Object.values(beds).flatMap(bList => bList) as Bed[]).reduce((sum, b) => sum + b.total, 0);
@@ -143,6 +380,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="space-y-8 p-4 sm:p-6 lg:p-8" id="admin-dashboard-container">
+      
+      {/* Brand & Export Data Control Bar */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white border border-slate-200 rounded-2xl p-5 shadow-xs font-sans">
+        <div>
+          <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">District Command & Supply Chain Analytics</h2>
+          <p className="text-xs text-slate-500 font-medium">District level medical inventory, workforce attendance, capacity command center & offline backups</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleExportCSV}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white font-mono font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-sm shadow-indigo-600/10"
+          >
+            📥 Export Supply CSV
+          </button>
+          <button
+            onClick={handleExportPDFMock}
+            className="bg-slate-900 hover:bg-slate-800 text-white font-mono font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5"
+          >
+            📋 Print Health Report (PDF)
+          </button>
+        </div>
+      </div>
       
       {/* SECTION 1: DISTRICT KPI STATS ROW */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 font-sans">
@@ -570,6 +829,567 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </table>
         </div>
       </div>
+
+      {/* SECTION 3B: CRITICAL / LIFE SAVING DRUG MANAGEMENT (CRITICAL DRUG STOCK) */}
+      <div className="bg-slate-900 text-white border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-800 gap-4">
+          <div className="font-sans">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 bg-rose-500 rounded-full animate-ping"></span>
+              <h3 className="font-extrabold text-base tracking-tight text-white">Critical Life-Saving Drug Stock</h3>
+            </div>
+            <p className="text-xs text-slate-400 mt-1">Stricter monitoring for high-priority medicines. <strong>Strict Business Rule:</strong> Critical drugs CANNOT be transferred between facilities.</p>
+          </div>
+
+          <div className="bg-red-500/10 border border-red-500/20 px-3 py-1.5 rounded-xl text-[10px] text-red-400 font-mono font-bold uppercase tracking-wider shrink-0">
+            🚫 TRANSFERS STRICTLY PROHIBITED
+          </div>
+        </div>
+
+        <div className="overflow-x-auto font-sans">
+          <table className="w-full text-left text-xs text-slate-400 border-collapse">
+            <thead>
+              <tr className="border-b border-slate-800 text-[10px] text-slate-500 uppercase font-bold tracking-wider">
+                <th className="py-3 px-4">Drug Name</th>
+                <th className="py-3 px-4">Facility / Clinic</th>
+                <th className="py-3 px-4 text-center">Current Stock</th>
+                <th className="py-3 px-4 text-center">Threshold</th>
+                <th className="py-3 px-4 text-center">Status</th>
+                <th className="py-3 px-4">Expiry & Batch</th>
+                <th className="py-3 px-4">Supplier</th>
+                <th className="py-3 px-4 text-right">District replenishment</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60">
+              {localFacilities
+                .filter(f => selectedFacilityId === "all" || f.id === selectedFacilityId)
+                .flatMap(fac => {
+                  if (!fac.criticalInventory) return [];
+                  return Object.entries(fac.criticalInventory).map(([drugId, drug]: [string, any]) => {
+                    const pct = drug.stock / drug.minThreshold;
+                    let statusColor = "text-emerald-400 bg-emerald-500/10 border-emerald-500/20";
+                    let statusLabel = "Adequate";
+                    if (pct <= 1.0) {
+                      statusColor = "text-rose-400 bg-rose-500/10 border-rose-500/20 animate-pulse";
+                      statusLabel = "Critical Shortage";
+                    } else if (pct <= 1.5) {
+                      statusColor = "text-amber-400 bg-amber-500/10 border-amber-500/20";
+                      statusLabel = "Low Stock";
+                    }
+
+                    const isReplenishing = replenishingId === `${fac.id}-${drugId}`;
+
+                    return (
+                      <tr key={`${fac.id}-${drugId}`} className="hover:bg-white/5 transition">
+                        <td className="py-4 px-4 font-bold text-white">🩸 {drug.name}</td>
+                        <td className="py-4 px-4 text-slate-300 font-medium">{fac.name}</td>
+                        <td className="py-4 px-4 text-center font-mono text-white font-extrabold">{drug.stock} units</td>
+                        <td className="py-4 px-4 text-center font-mono text-slate-500">Min {drug.minThreshold}</td>
+                        <td className="py-4 px-4 text-center">
+                          <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold border ${statusColor}`}>
+                            {statusLabel}
+                          </span>
+                        </td>
+                        <td className="py-4 px-4">
+                          <div className="text-[10px] text-slate-300">Exp: {drug.expiryDate}</div>
+                          <div className="text-[9px] text-slate-500 font-mono font-bold uppercase">Batch: {drug.batchNumber}</div>
+                        </td>
+                        <td className="py-4 px-4 text-slate-400">
+                          <div className="text-[10px]">{drug.supplier}</div>
+                          <div className="text-[9px] text-slate-500">Last: {drug.lastSupplyDate}</div>
+                        </td>
+                        <td className="py-4 px-4 text-right">
+                          <button
+                            type="button"
+                            disabled={isReplenishing}
+                            onClick={() => handleReplenishCritical(fac.id, drugId, 100)}
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white disabled:bg-slate-700 font-mono font-bold text-[10px] px-3 py-1.5 rounded-lg uppercase cursor-pointer"
+                          >
+                            {isReplenishing ? "Replenishing..." : "Replenish (100u)"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  });
+                })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* SECTION 3C: INTELLIGENT MEDICINE PROCUREMENT SYSTEM */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-4">
+          <div className="font-sans">
+            <h3 className="font-extrabold text-slate-800 text-base">Intelligent Medicine Procurement Center</h3>
+            <p className="text-xs text-slate-400 mt-1">Centralized supply coordination, vendor dispatch, and real-time tracking audits.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="bg-indigo-50 text-indigo-700 font-mono text-[10px] font-bold px-2 py-1 rounded">
+              District Central Store Stock
+            </span>
+          </div>
+        </div>
+
+        {/* Central Store Stock display */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 font-mono text-xs">
+          {Object.entries(localDistrictStore).map(([medId, qty]) => {
+            const med = medicines[medId];
+            return (
+              <div key={medId} className="bg-slate-50 border border-slate-150 p-4 rounded-xl flex items-center justify-between">
+                <div>
+                  <span className="text-[9px] text-slate-400 block font-bold uppercase">CENTRAL STORE</span>
+                  <span className="font-bold text-slate-800 block truncate max-w-[120px]">{med?.name || medId}</span>
+                </div>
+                <span className="text-sm font-black text-indigo-600 bg-white border border-slate-200 px-2 py-1 rounded-lg">
+                  {qty}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* DISTRICT ADMIN SUPPLY CHAIN OPTIMIZATION HUB */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4 font-sans text-left">
+          <div>
+            <span className="bg-rose-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider font-mono">
+              Admin bypass routing active
+            </span>
+            <h4 className="font-extrabold text-slate-800 text-sm mt-1 flex items-center gap-1.5">
+              🚀 District Admin Supply Chain Optimization Hub
+            </h4>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Directly coordinate replenishment from district stores or dispatch directly from manufacturers to clinics, minimizing regional delays and logistics expenses.
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            {(() => {
+              const lowStockAlerts: {
+                facilityId: string;
+                facilityName: string;
+                medicineId: string;
+                medicineName: string;
+                currentStock: number;
+                minThreshold: number;
+                unit: string;
+                isCritical: boolean;
+              }[] = [];
+
+              localFacilities.forEach(fac => {
+                // Check general medicines
+                (Object.entries(medicines) as [string, Medicine][]).forEach(([medId, med]) => {
+                  const stock = fac.inventory[medId] || 0;
+                  if (stock <= med.minThreshold) {
+                    lowStockAlerts.push({
+                      facilityId: fac.id,
+                      facilityName: fac.name,
+                      medicineId: medId,
+                      medicineName: med.name,
+                      currentStock: stock,
+                      minThreshold: med.minThreshold,
+                      unit: med.unit,
+                      isCritical: false
+                    });
+                  }
+                });
+
+                // Check critical medicines
+                if (fac.criticalInventory) {
+                  Object.entries(fac.criticalInventory).forEach(([drugId, drug]: [string, any]) => {
+                    if (drug.stock <= drug.minThreshold) {
+                      lowStockAlerts.push({
+                        facilityId: fac.id,
+                        facilityName: fac.name,
+                        medicineId: drugId,
+                        medicineName: drug.name,
+                        currentStock: drug.stock,
+                        minThreshold: drug.minThreshold,
+                        unit: "units",
+                        isCritical: true
+                      });
+                    }
+                  });
+                }
+              });
+
+              if (lowStockAlerts.length === 0) {
+                return (
+                  <div className="text-center py-6 bg-white border border-dashed border-slate-200 rounded-xl text-xs text-slate-400 italic">
+                    🎉 All district PHCs and CHCs are fully stocked! No supply chain bottlenecks detected.
+                  </div>
+                );
+              }
+
+              return lowStockAlerts.map((alert, idx) => {
+                const storeQty = localDistrictStore[alert.medicineId] || 0;
+                const isStoreAvailable = storeQty >= 100;
+                const isDispatching = actioningId === `${alert.facilityId}-${alert.medicineId}-dispatch`;
+                const isPurchasing = actioningId === `${alert.facilityId}-${alert.medicineId}-purchase`;
+                const isAnyLoading = actioningId !== null;
+
+                return (
+                  <div key={idx} className="bg-white border border-slate-150 p-4 rounded-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:shadow-xs transition">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-extrabold text-xs text-slate-800">
+                          🏥 {alert.facilityName}
+                        </span>
+                        {alert.isCritical ? (
+                          <span className="bg-red-50 text-red-700 border border-red-100 text-[8px] font-bold px-1.5 py-0.2 rounded font-mono">
+                            CRITICAL SHORTAGE
+                          </span>
+                        ) : (
+                          <span className="bg-amber-50 text-amber-700 border border-amber-150 text-[8px] font-bold px-1.5 py-0.2 rounded font-mono">
+                            LOW SUPPLY
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-700 font-bold">
+                        💊 {alert.medicineName}
+                      </p>
+                      <p className="text-[10px] text-slate-400 font-mono font-bold">
+                        Stock: <span className="text-rose-600 font-extrabold">{alert.currentStock}</span> / Threshold: {alert.minThreshold} {alert.unit}
+                      </p>
+                    </div>
+
+                    {/* Central Store Availability Check */}
+                    <div className="bg-slate-50 border border-slate-150 rounded-lg p-2.5 px-3 font-mono text-[11px] space-y-1 shrink-0 w-full md:w-auto">
+                      <span className="text-[9px] text-slate-400 block font-bold uppercase tracking-wider">District Central Store</span>
+                      {isStoreAvailable ? (
+                        <div className="text-emerald-700 font-extrabold flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full"></span>
+                          Available ({storeQty} units)
+                        </div>
+                      ) : (
+                        <div className="text-rose-700 font-extrabold flex items-center gap-1">
+                          <span className="h-1.5 w-1.5 bg-rose-500 rounded-full animate-pulse"></span>
+                          Low Store Stock ({storeQty} units)
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Admin Optimization Decisions */}
+                    <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                      <button
+                        type="button"
+                        disabled={!isStoreAvailable || isAnyLoading}
+                        onClick={() => handleDispatchFromStore(alert.facilityId, alert.medicineId, 100)}
+                        className={`font-mono text-[10px] font-extrabold px-3 py-2 rounded-lg uppercase cursor-pointer transition ${
+                          isStoreAvailable
+                            ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs animate-pulse"
+                            : "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed"
+                        }`}
+                      >
+                        {isDispatching ? "Transferring..." : "Dispatch from Store (100u)"}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isAnyLoading}
+                        onClick={() => handleDirectPurchase(alert.facilityId, alert.medicineId, 100)}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white disabled:bg-slate-200 disabled:text-slate-400 font-mono text-[10px] font-extrabold px-3 py-2 rounded-lg uppercase cursor-pointer transition"
+                      >
+                        {isPurchasing ? "Purchasing..." : "Direct Purchase & Ship (100u)"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        </div>
+
+        {/* Create Procurement Order Form */}
+        <form onSubmit={handleCreateProcurement} className="bg-slate-50 border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-4 gap-4 items-end text-xs font-sans">
+          <div>
+            <label className="block text-slate-500 uppercase tracking-wider font-bold mb-1.5">Destination Facility</label>
+            <select
+              value={procureFacilityId}
+              onChange={(e) => setProcureFacilityId(e.target.value)}
+              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none cursor-pointer"
+              required
+            >
+              <option value="">Select Target Center</option>
+              {localFacilities.map(f => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-slate-500 uppercase tracking-wider font-bold mb-1.5">Drug Formulation</label>
+            <select
+              value={procureMedId}
+              onChange={(e) => setProcureMedId(e.target.value)}
+              className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none cursor-pointer"
+              required
+            >
+              <option value="">Select Medicine</option>
+              {Object.values(medicines).map((med: any) => (
+                <option key={med.id} value={med.id}>{med.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-slate-500 uppercase tracking-wider font-bold mb-1.5">Quantity</label>
+              <input
+                type="number"
+                value={procureQty}
+                onChange={(e) => setProcureQty(Number(e.target.value))}
+                min={50}
+                className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs text-slate-800 outline-none"
+                required
+              />
+            </div>
+            <div className="flex items-center justify-center h-full pb-1.5">
+              <label className="flex items-center gap-1.5 cursor-pointer font-bold text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={procureIsCritical}
+                  onChange={(e) => setProcureIsCritical(e.target.checked)}
+                  className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer h-4 w-4"
+                />
+                <span>Critical?</span>
+              </label>
+            </div>
+          </div>
+
+          <button
+            type="submit"
+            disabled={procuring}
+            className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-600 text-white font-extrabold py-2.5 rounded-xl text-xs transition cursor-pointer"
+          >
+            {procuring ? "Generating Order..." : "Create Procurement Order"}
+          </button>
+        </form>
+
+        {/* Procurement Orders Status Logs */}
+        <div className="space-y-3 font-sans">
+          <span className="text-[10px] text-slate-400 font-mono font-bold uppercase tracking-wider block">Active Procurement Orders & Shipping Logs</span>
+          <div className="space-y-2 max-h-72 overflow-y-auto">
+            {localProcurements.map((order) => {
+              const fac = localFacilities.find(f => f.id === order.facilityId);
+              const med = medicines[order.medicineId];
+
+              return (
+                <div key={order.orderId} className="bg-slate-50 border border-slate-150 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-slate-800">📦 Order: {order.orderId}</span>
+                      <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                        order.priority === "CRITICAL"
+                          ? "bg-rose-100 text-rose-800"
+                          : "bg-indigo-100 text-indigo-800"
+                      }`}>
+                        Priority Score: {order.priorityScore} ({order.priority})
+                      </span>
+                    </div>
+                    <div className="text-slate-500 font-medium">
+                      Medicine: <strong className="text-slate-800">{med?.name || order.medicineId}</strong> • Qty: <strong>{order.quantity} units</strong> • Destination: <strong className="text-slate-700">{fac?.name}</strong>
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      Logistics Status: <strong className="text-indigo-600">{order.status}</strong> • ETA: <strong>{order.eta}</strong>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {order.status === "Requested" && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateProcurement(order.orderId, "Dispatched")}
+                          className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg uppercase cursor-pointer"
+                        >
+                          Dispatch from Store
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateProcurement(order.orderId, "Dispatched")}
+                          className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg uppercase cursor-pointer"
+                        >
+                          Purchase Directly
+                        </button>
+                      </>
+                    )}
+
+                    {order.status === "Dispatched" && (
+                      <button
+                        type="button"
+                        onClick={() => handleUpdateProcurement(order.orderId, "Delivered")}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg uppercase cursor-pointer"
+                      >
+                        Fulfill Delivery
+                      </button>
+                    )}
+
+                    {order.status === "Delivered" && (
+                      <span className="text-emerald-600 bg-emerald-50 border border-emerald-150 text-[10px] font-bold px-3 py-1.5 rounded-lg uppercase flex items-center gap-1">
+                        <CheckCircle className="h-3.5 w-3.5" /> Fulfill Completed
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {localProcurements.length === 0 && (
+              <p className="text-center py-6 text-slate-400 text-xs italic">No active procurement orders logged at this time.</p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* SECTION 3D: REAL-TIME LABORATORY INVESTIGATION MONITORING */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
+        <div className="pb-4 border-b border-slate-100">
+          <h3 className="font-extrabold text-slate-800 text-base">Real-Time Laboratory Investigations Desk</h3>
+          <p className="text-xs text-slate-400 mt-1">Track reagent stock outlevels, clinical machine calibration status, and pending workloads per facility.</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 font-sans">
+          {localFacilities
+            .filter(f => selectedFacilityId === "all" || f.id === selectedFacilityId)
+            .flatMap(fac => {
+              if (!fac.labs) return [];
+              return fac.labs.map((lab: any) => {
+                const reagentColor = lab.reagentAvailability === "Adequate"
+                  ? "bg-emerald-100 text-emerald-800"
+                  : lab.reagentAvailability === "Low"
+                  ? "bg-amber-100 text-amber-800"
+                  : "bg-rose-100 text-rose-800 animate-pulse";
+
+                const isOperational = lab.machineStatus === "Operational";
+
+                return (
+                  <div key={`${fac.id}-${lab.testId}`} className="border border-slate-150 rounded-xl p-4 space-y-3 bg-slate-50/40 relative">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="text-[9px] text-slate-400 font-mono font-bold block">{fac.name.toUpperCase()}</span>
+                        <h5 className="font-extrabold text-slate-800 text-xs">🧪 {lab.testName}</h5>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase ${
+                        isOperational ? "bg-indigo-50 text-indigo-700" : "bg-red-50 text-red-700"
+                      }`}>
+                        {lab.machineStatus}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[11px] font-mono border-t border-b border-slate-150/50 py-2">
+                      <div>
+                        <span className="text-[9px] text-slate-400 block font-bold">REAGENT LEVEL</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold mt-0.5 inline-block ${reagentColor}`}>
+                          {lab.reagentAvailability}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-400 block font-bold">SAMPLE WORKLOAD</span>
+                        <span className="text-slate-800 font-bold block mt-0.5">{lab.pendingSamples} samples pending</span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[10px] text-slate-400">
+                      <span>Availability: <strong className="text-indigo-600">{lab.status}</strong></span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingLabTest({ facilityId: fac.id, testId: lab.testId });
+                          setEditLabStatus(lab.status);
+                          setEditMachineStatus(lab.machineStatus);
+                          setEditReagent(lab.reagentAvailability);
+                          setEditSamples(lab.pendingSamples);
+                        }}
+                        className="text-indigo-600 hover:text-indigo-800 font-black cursor-pointer uppercase text-[9px]"
+                      >
+                        Adjust Parameters
+                      </button>
+                    </div>
+                  </div>
+                );
+              });
+            })}
+        </div>
+      </div>
+
+      {/* Inline Popup modal for adjustments */}
+      {editingLabTest && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-sm w-full p-6 shadow-2xl font-sans space-y-4 animate-scaleUp">
+            <h4 className="font-extrabold text-slate-900 text-sm">Adjust Laboratory Status Parameters</h4>
+            
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-500 font-bold mb-1">Reagent Level</label>
+                <select
+                  value={editReagent}
+                  onChange={(e) => setEditReagent(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 outline-none cursor-pointer"
+                >
+                  <option value="Adequate">Adequate Reagent Stock</option>
+                  <option value="Low">Low Reagent Warning</option>
+                  <option value="Out of Stock">Out of Stock Alert</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-500 font-bold mb-1">Machine Status</label>
+                <select
+                  value={editMachineStatus}
+                  onChange={(e) => setEditMachineStatus(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 outline-none cursor-pointer"
+                >
+                  <option value="Operational">Operational (Calibrated)</option>
+                  <option value="Under Maintenance">Under Maintenance (Offline)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-500 font-bold mb-1">Pending Sample Count</label>
+                <input
+                  type="number"
+                  value={editSamples}
+                  onChange={(e) => setEditSamples(Number(e.target.value))}
+                  min={0}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 outline-none font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-500 font-bold mb-1">Availability Classification</label>
+                <select
+                  value={editLabStatus}
+                  onChange={(e) => setEditLabStatus(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 outline-none cursor-pointer"
+                >
+                  <option value="Available">Available (Turnaround &lt; 2hr)</option>
+                  <option value="Delayed">Delayed (Heavy Workload)</option>
+                  <option value="Unavailable">Unavailable (No Reagents / Down)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setEditingLabTest(null)}
+                className="px-4 py-2 border border-slate-200 rounded-xl hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={savingLab}
+                onClick={handleSaveLabStatus}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl cursor-pointer"
+              >
+                {savingLab ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* SECTION 4: DOCTOR ATTENDANCE & AMBULANCE TRACKING */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 font-sans">

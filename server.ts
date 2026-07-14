@@ -68,12 +68,55 @@ interface Medicine {
   category: string;
 }
 
+interface CriticalDrug {
+  id: string;
+  name: string;
+  stock: number;
+  minThreshold: number;
+  expiryDate: string;
+  batchNumber: string;
+  supplier: string;
+  lastSupplyDate: string;
+  dailyConsumption: number;
+}
+
+interface LabInvestigation {
+  id: string;
+  name: string;
+  status: "Available" | "Unavailable" | "Limited Slots" | "Maintenance" | "Reagents Out of Stock";
+  machineStatus: "Operational" | "Under Maintenance" | "Down";
+  reagentAvailability: "Adequate" | "Low" | "Out of Stock";
+  dailyCapacity: number;
+  pendingSamples: number;
+  expectedAvailabilityTime?: string;
+}
+
+interface ProcurementOrder {
+  id: string;
+  facilityId: string;
+  facilityName: string;
+  medicineId: string;
+  medicineName: string;
+  isCritical: boolean;
+  quantity: number;
+  source: "District Store" | "Direct Purchase";
+  supplierName: string;
+  status: "Pending" | "Dispatched" | "Delivered";
+  dispatchStatus: "Awaiting Dispatch" | "In Transit" | "Arrived";
+  shipmentTracking: string;
+  estimatedDelivery: string;
+  priorityScore: number;
+  urgencyReason: string;
+}
+
 interface Facility {
   id: string;
   name: string;
   type: "PHC" | "CHC";
   distance: number; // in km from Central CHC
   inventory: Record<string, number>; // medId -> stock count
+  criticalInventory?: Record<string, CriticalDrug>;
+  labInvestigations?: Record<string, LabInvestigation>;
 }
 
 interface Bed {
@@ -130,6 +173,15 @@ interface Ambulance {
   status: "Available" | "En-Route" | "Maintenance";
   location: string;
   assignedPatientId: string | null;
+  latitude?: number;
+  longitude?: number;
+  eta?: string;
+  patientStatus?: string;
+  assignedPatientName?: string | null;
+  driverName?: string;
+  driverPhone?: string;
+  responseTimes?: number[];
+  fuelLevel?: number;
 }
 
 // Master Medicines list
@@ -145,35 +197,113 @@ const MEDICINES: Record<string, Medicine> = {
   "med-9": { id: "med-9", name: "Artesunate Injection", stock: 30, minThreshold: 25, unit: "Vials", category: "Antimalarial" },
 };
 
+const INITIAL_CRITICAL_DRUGS: Record<string, Record<string, CriticalDrug>> = {
+  "fac-1": {
+    "crit-1": { id: "crit-1", name: "Adrenaline 1mg Injection", stock: 250, minThreshold: 50, expiryDate: "2027-05-15", batchNumber: "ADR-902", supplier: "Astra Biopharma", lastSupplyDate: "2026-06-10", dailyConsumption: 5 },
+    "crit-2": { id: "crit-2", name: "Atropine 0.6mg Injection", stock: 180, minThreshold: 40, expiryDate: "2027-08-20", batchNumber: "ATR-441", supplier: "Vedic Pharma Ltd", lastSupplyDate: "2026-05-18", dailyConsumption: 3 },
+    "crit-3": { id: "crit-3", name: "Insulin Soluble 40 IU/ml", stock: 150, minThreshold: 30, expiryDate: "2026-12-01", batchNumber: "INS-201", supplier: "Himalayan Bio", lastSupplyDate: "2026-06-25", dailyConsumption: 4 },
+    "crit-4": { id: "crit-4", name: "Oxytocin 5 IU Injection", stock: 140, minThreshold: 35, expiryDate: "2027-02-14", batchNumber: "OXY-321", supplier: "Apex Life", lastSupplyDate: "2026-07-01", dailyConsumption: 6 },
+    "crit-5": { id: "crit-5", name: "Hydrocortisone 100mg", stock: 220, minThreshold: 40, expiryDate: "2028-01-10", batchNumber: "HYD-007", supplier: "Glenmark Allied", lastSupplyDate: "2026-06-30", dailyConsumption: 5 }
+  },
+  "fac-2": {
+    "crit-1": { id: "crit-1", name: "Adrenaline 1mg Injection", stock: 12, minThreshold: 25, expiryDate: "2027-04-18", batchNumber: "ADR-903", supplier: "Astra Biopharma", lastSupplyDate: "2026-05-10", dailyConsumption: 3 },
+    "crit-2": { id: "crit-2", name: "Atropine 0.6mg Injection", stock: 35, minThreshold: 30, expiryDate: "2027-06-11", batchNumber: "ATR-442", supplier: "Vedic Pharma Ltd", lastSupplyDate: "2026-04-18", dailyConsumption: 2 },
+    "crit-3": { id: "crit-3", name: "Insulin Soluble 40 IU/ml", stock: 45, minThreshold: 20, expiryDate: "2026-11-15", batchNumber: "INS-202", supplier: "Himalayan Bio", lastSupplyDate: "2026-05-20", dailyConsumption: 2 },
+    "crit-4": { id: "crit-4", name: "Oxytocin 5 IU Injection", stock: 10, minThreshold: 20, expiryDate: "2027-03-05", batchNumber: "OXY-323", supplier: "Apex Life", lastSupplyDate: "2026-06-15", dailyConsumption: 3 },
+    "crit-5": { id: "crit-5", name: "Hydrocortisone 100mg", stock: 50, minThreshold: 25, expiryDate: "2027-10-12", batchNumber: "HYD-009", supplier: "Glenmark Allied", lastSupplyDate: "2026-06-15", dailyConsumption: 3 }
+  },
+  "fac-3": {
+    "crit-1": { id: "crit-1", name: "Adrenaline 1mg Injection", stock: 40, minThreshold: 25, expiryDate: "2027-04-18", batchNumber: "ADR-904", supplier: "Astra Biopharma", lastSupplyDate: "2026-05-10", dailyConsumption: 2 },
+    "crit-2": { id: "crit-2", name: "Atropine 0.6mg Injection", stock: 38, minThreshold: 20, expiryDate: "2027-06-11", batchNumber: "ATR-443", supplier: "Vedic Pharma Ltd", lastSupplyDate: "2026-04-18", dailyConsumption: 1 },
+    "crit-3": { id: "crit-3", name: "Insulin Soluble 40 IU/ml", stock: 50, minThreshold: 20, expiryDate: "2026-11-15", batchNumber: "INS-203", supplier: "Himalayan Bio", lastSupplyDate: "2026-05-20", dailyConsumption: 2 },
+    "crit-4": { id: "crit-4", name: "Oxytocin 5 IU Injection", stock: 28, minThreshold: 20, expiryDate: "2027-03-05", batchNumber: "OXY-324", supplier: "Apex Life", lastSupplyDate: "2026-06-15", dailyConsumption: 2 },
+    "crit-5": { id: "crit-5", name: "Hydrocortisone 100mg", stock: 60, minThreshold: 25, expiryDate: "2027-10-12", batchNumber: "HYD-010", supplier: "Glenmark Allied", lastSupplyDate: "2026-06-15", dailyConsumption: 2 }
+  },
+  "fac-4": {
+    "crit-1": { id: "crit-1", name: "Adrenaline 1mg Injection", stock: 3, minThreshold: 25, expiryDate: "2027-04-18", batchNumber: "ADR-905", supplier: "Astra Biopharma", lastSupplyDate: "2026-05-10", dailyConsumption: 2 },
+    "crit-2": { id: "crit-2", name: "Atropine 0.6mg Injection", stock: 25, minThreshold: 20, expiryDate: "2027-06-11", batchNumber: "ATR-444", supplier: "Vedic Pharma Ltd", lastSupplyDate: "2026-04-18", dailyConsumption: 1 },
+    "crit-3": { id: "crit-3", name: "Insulin Soluble 40 IU/ml", stock: 5, minThreshold: 20, expiryDate: "2026-11-15", batchNumber: "INS-204", supplier: "Himalayan Bio", lastSupplyDate: "2026-05-20", dailyConsumption: 2 },
+    "crit-4": { id: "crit-4", name: "Oxytocin 5 IU Injection", stock: 2, minThreshold: 20, expiryDate: "2027-03-05", batchNumber: "OXY-325", supplier: "Apex Life", lastSupplyDate: "2026-06-15", dailyConsumption: 3 },
+    "crit-5": { id: "crit-5", name: "Hydrocortisone 100mg", stock: 4, minThreshold: 25, expiryDate: "2027-10-12", batchNumber: "HYD-011", supplier: "Glenmark Allied", lastSupplyDate: "2026-06-15", dailyConsumption: 2 }
+  }
+};
+
+const INITIAL_LAB_INVESTIGATIONS: Record<string, Record<string, LabInvestigation>> = {
+  "fac-1": {
+    "cbc": { id: "cbc", name: "Complete Blood Count (CBC)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 100, pendingSamples: 15 },
+    "lft": { id: "lft", name: "Liver Function Test (LFT)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 50, pendingSamples: 8 },
+    "kft": { id: "kft", name: "Kidney Function Test (KFT)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 50, pendingSamples: 12 },
+    "dengue": { id: "dengue", name: "Dengue NS1 Antigen", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 80, pendingSamples: 24 },
+    "malaria": { id: "malaria", name: "Malaria Smear", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 80, pendingSamples: 18 },
+    "sugar": { id: "sugar", name: "Blood Sugar (HbA1c)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 150, pendingSamples: 25 },
+    "ultrasound": { id: "ultrasound", name: "Obstetric Ultrasound", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 20, pendingSamples: 5 }
+  },
+  "fac-2": {
+    "cbc": { id: "cbc", name: "Complete Blood Count (CBC)", status: "Limited Slots", machineStatus: "Operational", reagentAvailability: "Low", dailyCapacity: 15, pendingSamples: 12 },
+    "lft": { id: "lft", name: "Liver Function Test (LFT)", status: "Maintenance", machineStatus: "Under Maintenance", reagentAvailability: "Adequate", dailyCapacity: 0, pendingSamples: 0, expectedAvailabilityTime: "Tomorrow Morning" },
+    "kft": { id: "kft", name: "Kidney Function Test (KFT)", status: "Unavailable", machineStatus: "Down", reagentAvailability: "Low", dailyCapacity: 0, pendingSamples: 0, expectedAvailabilityTime: "In 2 Days" },
+    "dengue": { id: "dengue", name: "Dengue NS1 Antigen", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 20, pendingSamples: 5 },
+    "malaria": { id: "malaria", name: "Malaria Smear", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 25, pendingSamples: 4 },
+    "sugar": { id: "sugar", name: "Blood Sugar (HbA1c)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 40, pendingSamples: 8 },
+    "ultrasound": { id: "ultrasound", name: "Obstetric Ultrasound", status: "Unavailable", machineStatus: "Down", reagentAvailability: "Out of Stock", dailyCapacity: 0, pendingSamples: 0, expectedAvailabilityTime: "Reagents Pending" }
+  },
+  "fac-3": {
+    "cbc": { id: "cbc", name: "Complete Blood Count (CBC)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 20, pendingSamples: 5 },
+    "lft": { id: "lft", name: "Liver Function Test (LFT)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 10, pendingSamples: 2 },
+    "kft": { id: "kft", name: "Kidney Function Test (KFT)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 10, pendingSamples: 3 },
+    "dengue": { id: "dengue", name: "Dengue NS1 Antigen", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 20, pendingSamples: 6 },
+    "malaria": { id: "malaria", name: "Malaria Smear", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 20, pendingSamples: 4 },
+    "sugar": { id: "sugar", name: "Blood Sugar (HbA1c)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 50, pendingSamples: 10 },
+    "ultrasound": { id: "ultrasound", name: "Obstetric Ultrasound", status: "Limited Slots", machineStatus: "Operational", reagentAvailability: "Low", dailyCapacity: 5, pendingSamples: 3 }
+  },
+  "fac-4": {
+    "cbc": { id: "cbc", name: "Complete Blood Count (CBC)", status: "Reagents Out of Stock", machineStatus: "Operational", reagentAvailability: "Out of Stock", dailyCapacity: 15, pendingSamples: 0, expectedAvailabilityTime: "Pending Delivery" },
+    "lft": { id: "lft", name: "Liver Function Test (LFT)", status: "Unavailable", machineStatus: "Down", reagentAvailability: "Low", dailyCapacity: 0, pendingSamples: 0, expectedAvailabilityTime: "In 4 Days" },
+    "kft": { id: "kft", name: "Kidney Function Test (KFT)", status: "Unavailable", machineStatus: "Down", reagentAvailability: "Low", dailyCapacity: 0, pendingSamples: 0, expectedAvailabilityTime: "In 4 Days" },
+    "dengue": { id: "dengue", name: "Dengue NS1 Antigen", status: "Limited Slots", machineStatus: "Operational", reagentAvailability: "Low", dailyCapacity: 10, pendingSamples: 8 },
+    "malaria": { id: "malaria", name: "Malaria Smear", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 15, pendingSamples: 2 },
+    "sugar": { id: "sugar", name: "Blood Sugar (HbA1c)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 30, pendingSamples: 12 },
+    "ultrasound": { id: "ultrasound", name: "Obstetric Ultrasound", status: "Unavailable", machineStatus: "Under Maintenance", reagentAvailability: "Adequate", dailyCapacity: 0, pendingSamples: 0, expectedAvailabilityTime: "Tomorrow Evening" }
+  }
+};
+
 // Initial Seed Data
 const INITIAL_FACILITIES: Facility[] = [
   {
     id: "fac-1",
-    name: "Central CHC (Community Health Centre)",
+    name: "Central CHC  (Community Health Centre)",
     type: "CHC",
     distance: 0,
-    inventory: { "med-1": 650, "med-2": 450, "med-3": 350, "med-4": 550, "med-5": 500, "med-6": 800, "med-7": 90, "med-8": 25, "med-9": 20 }
+    inventory: { "med-1": 650, "med-2": 450, "med-3": 350, "med-4": 550, "med-5": 500, "med-6": 800, "med-7": 90, "med-8": 25, "med-9": 20 },
+    criticalInventory: INITIAL_CRITICAL_DRUGS["fac-1"],
+    labInvestigations: INITIAL_LAB_INVESTIGATIONS["fac-1"]
   },
   {
     id: "fac-2",
     name: "North PHC (Primary Health Centre)",
     type: "PHC",
     distance: 12,
-    inventory: { "med-1": 150, "med-2": 80, "med-3": 40, "med-4": 150, "med-5": 120, "med-6": 300, "med-7": 10, "med-8": 5, "med-9": 2 } // critical shortage
+    inventory: { "med-1": 150, "med-2": 80, "med-3": 40, "med-4": 150, "med-5": 120, "med-6": 300, "med-7": 10, "med-8": 5, "med-9": 2 }, // critical shortage
+    criticalInventory: INITIAL_CRITICAL_DRUGS["fac-2"],
+    labInvestigations: INITIAL_LAB_INVESTIGATIONS["fac-2"]
   },
   {
     id: "fac-3",
     name: "East PHC (Primary Health Centre)",
     type: "PHC",
     distance: 18,
-    inventory: { "med-1": 320, "med-2": 210, "med-3": 180, "med-4": 220, "med-5": 250, "med-6": 320, "med-7": 40, "med-8": 12, "med-9": 6 }
+    inventory: { "med-1": 320, "med-2": 210, "med-3": 180, "med-4": 220, "med-5": 250, "med-6": 320, "med-7": 40, "med-8": 12, "med-9": 6 },
+    criticalInventory: INITIAL_CRITICAL_DRUGS["fac-3"],
+    labInvestigations: INITIAL_LAB_INVESTIGATIONS["fac-3"]
   },
   {
     id: "fac-4",
     name: "South PHC (Primary Health Centre)",
     type: "PHC",
     distance: 25,
-    inventory: { "med-1": 80, "med-2": 60, "med-3": 30, "med-4": 80, "med-5": 80, "med-6": 80, "med-7": 10, "med-8": 3, "med-9": 2 } // critical stock-out alerts
+    inventory: { "med-1": 80, "med-2": 60, "med-3": 30, "med-4": 80, "med-5": 80, "med-6": 80, "med-7": 10, "med-8": 3, "med-9": 2 }, // critical stock-out alerts
+    criticalInventory: INITIAL_CRITICAL_DRUGS["fac-4"],
+    labInvestigations: INITIAL_LAB_INVESTIGATIONS["fac-4"]
   }
 ];
 
@@ -293,9 +423,119 @@ const INITIAL_PATIENTS: Patient[] = [
 ];
 
 const INITIAL_AMBULANCES: Ambulance[] = [
-  { id: "amb-1", plateNumber: "MH-12-HE-5512", status: "Available", location: "Central CHC (Community Health Centre)", assignedPatientId: null },
-  { id: "amb-2", plateNumber: "MH-12-HE-9944", status: "En-Route", location: "North PHC -> Central CHC", assignedPatientId: "pat-2" },
-  { id: "amb-3", plateNumber: "MH-12-HE-3311", status: "Available", location: "South PHC (Primary Health Centre)", assignedPatientId: null }
+  {
+    id: "amb-1",
+    plateNumber: "MH-12-HE-5512",
+    status: "Available",
+    location: "Central CHC (Community Health Centre)",
+    assignedPatientId: null,
+    latitude: 400,
+    longitude: 200,
+    driverName: "Vijay Kumar",
+    driverPhone: "+91 98765 43210",
+    fuelLevel: 85,
+    responseTimes: [11, 14, 10, 12, 13]
+  },
+  {
+    id: "amb-2",
+    plateNumber: "MH-12-HE-9944",
+    status: "En-Route",
+    location: "North PHC -> Central CHC",
+    assignedPatientId: "pat-2",
+    latitude: 400,
+    longitude: 110,
+    eta: "7 mins",
+    patientStatus: "Moderate - Pregnancy Checkup",
+    assignedPatientName: "Sunita Devi",
+    driverName: "Anil Deshmukh",
+    driverPhone: "+91 98765 43211",
+    fuelLevel: 60,
+    responseTimes: [15, 18, 16, 17, 19]
+  },
+  {
+    id: "amb-3",
+    plateNumber: "MH-12-HE-3311",
+    status: "Available",
+    location: "South PHC (Primary Health Centre)",
+    assignedPatientId: null,
+    latitude: 400,
+    longitude: 350,
+    driverName: "Rajesh Shinde",
+    driverPhone: "+91 98765 43212",
+    fuelLevel: 90,
+    responseTimes: [22, 24, 21, 25, 23]
+  }
+];
+
+const INITIAL_DISTRICT_STORE: Record<string, number> = {
+  "med-1": 15000,
+  "med-2": 8000,
+  "med-3": 6000,
+  "med-4": 5000,
+  "med-5": 7500,
+  "med-6": 12000,
+  "med-7": 3000,
+  "med-8": 1500,
+  "med-9": 1000,
+  "crit-1": 1200,
+  "crit-2": 900,
+  "crit-3": 750,
+  "crit-4": 1100,
+  "crit-5": 850
+};
+
+const INITIAL_PROCUREMENT_ORDERS: ProcurementOrder[] = [
+  {
+    id: "ord-1",
+    facilityId: "fac-2",
+    facilityName: "North PHC (Primary Health Centre)",
+    medicineId: "crit-1",
+    medicineName: "Adrenaline 1mg Injection",
+    isCritical: true,
+    quantity: 50,
+    source: "District Store",
+    supplierName: "District Central Warehouse",
+    status: "Dispatched",
+    dispatchStatus: "In Transit",
+    shipmentTracking: "AMB-TRK-9812",
+    estimatedDelivery: "In 3 hours",
+    priorityScore: 94,
+    urgencyReason: "Critical Stock level at facility is 12 units (minimum threshold: 25)."
+  },
+  {
+    id: "ord-2",
+    facilityId: "fac-4",
+    facilityName: "South PHC (Primary Health Centre)",
+    medicineId: "crit-4",
+    medicineName: "Oxytocin 5 IU Injection",
+    isCritical: true,
+    quantity: 100,
+    source: "Direct Purchase",
+    supplierName: "Apex Life Suppliers",
+    status: "Pending",
+    dispatchStatus: "Awaiting Dispatch",
+    shipmentTracking: "APX-TRK-0012",
+    estimatedDelivery: "Tomorrow Noon",
+    priorityScore: 98,
+    urgencyReason: "Extreme shortage. Current stock: 2 units (threshold: 20)."
+  },
+  {
+    id: "ord-3",
+    facilityId: "fac-4",
+    facilityName: "South PHC (Primary Health Centre)",
+    medicineId: "med-1",
+    medicineName: "Paracetamol 500mg",
+    isCritical: false,
+    quantity: 500,
+    source: "District Store",
+    supplierName: "District Central Warehouse",
+    status: "Delivered",
+    dispatchStatus: "Arrived",
+    shipmentTracking: "AMB-TRK-8811",
+    estimatedDelivery: "Delivered Today",
+    priorityScore: 65,
+    urgencyReason: "Normal low stock replenish."
+  }
 ];
 
 // Active State
@@ -305,7 +545,9 @@ let db = {
   doctors: JSON.parse(JSON.stringify(INITIAL_DOCTORS)) as Doctor[],
   patients: JSON.parse(JSON.stringify(INITIAL_PATIENTS)) as Patient[],
   ambulances: JSON.parse(JSON.stringify(INITIAL_AMBULANCES)) as Ambulance[],
-  medicines: JSON.parse(JSON.stringify(MEDICINES)) as Record<string, Medicine>
+  medicines: JSON.parse(JSON.stringify(MEDICINES)) as Record<string, Medicine>,
+  districtStore: JSON.parse(JSON.stringify(INITIAL_DISTRICT_STORE)) as Record<string, number>,
+  procurementOrders: JSON.parse(JSON.stringify(INITIAL_PROCUREMENT_ORDERS)) as ProcurementOrder[]
 };
 
 // API Route: Reset State
@@ -316,7 +558,9 @@ app.post("/api/state/reset", (req, res) => {
     doctors: JSON.parse(JSON.stringify(INITIAL_DOCTORS)),
     patients: JSON.parse(JSON.stringify(INITIAL_PATIENTS)),
     ambulances: JSON.parse(JSON.stringify(INITIAL_AMBULANCES)),
-    medicines: JSON.parse(JSON.stringify(MEDICINES))
+    medicines: JSON.parse(JSON.stringify(MEDICINES)),
+    districtStore: JSON.parse(JSON.stringify(INITIAL_DISTRICT_STORE)),
+    procurementOrders: JSON.parse(JSON.stringify(INITIAL_PROCUREMENT_ORDERS))
   };
   res.json({ message: "Database reset to initial demo seeds successfully", db });
 });
@@ -324,6 +568,454 @@ app.post("/api/state/reset", (req, res) => {
 // API Route: Get State
 app.get("/api/state", (req, res) => {
   res.json(db);
+});
+
+// API Route: Replenish Critical Drug from District Store (Strict rules: No transfer between PHC/CHC)
+app.post("/api/admin/replenish-critical", (req, res) => {
+  const { facilityId, drugId, qty } = req.body;
+  if (!facilityId || !drugId || !qty) {
+    return res.status(400).json({ error: "Missing facilityId, drugId, or quantity." });
+  }
+
+  const facility = db.facilities.find(f => f.id === facilityId);
+  if (!facility || !facility.criticalInventory) {
+    return res.status(404).json({ error: "Facility or critical inventory not found." });
+  }
+
+  const drug = facility.criticalInventory[drugId];
+  if (!drug) {
+    return res.status(404).json({ error: "Drug not found in facility critical inventory." });
+  }
+
+  const storeStock = db.districtStore[drugId] || 0;
+  if (storeStock < qty) {
+    return res.status(400).json({ error: `Insufficient stock in District Store. Only ${storeStock} units available.` });
+  }
+
+  db.districtStore[drugId] -= Number(qty);
+  drug.stock += Number(qty);
+  drug.lastSupplyDate = new Date().toISOString().split('T')[0];
+
+  res.json({
+    success: true,
+    db,
+    message: `Successfully replenished ${qty} units of ${drug.name} from District Store.`
+  });
+});
+
+// API Route: Create Normal / Critical Medicine Procurement Order
+app.post("/api/admin/create-procurement", (req, res) => {
+  const { facilityId, medicineId, quantity, isCritical } = req.body;
+  if (!facilityId || !medicineId || !quantity) {
+    return res.status(400).json({ error: "Missing required procurement fields." });
+  }
+
+  const facility = db.facilities.find(f => f.id === facilityId);
+  if (!facility) {
+    return res.status(404).json({ error: "Facility not found." });
+  }
+
+  let medicineName = "";
+  let currentStock = 0;
+  let minThreshold = 100;
+
+  if (isCritical) {
+    const drug = facility.criticalInventory?.[medicineId];
+    if (!drug) return res.status(404).json({ error: "Critical drug not found in facility." });
+    medicineName = drug.name;
+    currentStock = drug.stock;
+    minThreshold = drug.minThreshold;
+  } else {
+    const stock = facility.inventory[medicineId];
+    const med = db.medicines[medicineId];
+    if (stock === undefined || !med) return res.status(404).json({ error: "Medicine not found." });
+    medicineName = med.name;
+    currentStock = stock;
+    minThreshold = med.minThreshold;
+  }
+
+  // Check District Store stock
+  const districtStock = db.districtStore[medicineId] || 0;
+  const useDistrictStore = districtStock >= quantity;
+  const source = useDistrictStore ? "District Store" : "Direct Purchase";
+  const supplierName = useDistrictStore ? "District Central Warehouse" : "Apex Life Suppliers";
+
+  // Priority calculation
+  let priorityScore = isCritical ? 80 : 40;
+  if (currentStock < minThreshold) {
+    priorityScore += Math.min(19, Math.round(((minThreshold - currentStock) / minThreshold) * 20));
+  }
+  if (currentStock === 0) {
+    priorityScore = 99;
+  }
+
+  const newOrderId = `ord-${db.procurementOrders.length + 1}`;
+  const newOrder: ProcurementOrder = {
+    id: newOrderId,
+    facilityId,
+    facilityName: facility.name,
+    medicineId,
+    medicineName,
+    isCritical: !!isCritical,
+    quantity: Number(quantity),
+    source,
+    supplierName,
+    status: "Pending",
+    dispatchStatus: "Awaiting Dispatch",
+    shipmentTracking: `TRK-${Math.floor(1000 + Math.random() * 9000)}`,
+    estimatedDelivery: source === "District Store" ? "In 1 Day" : "In 3 Days",
+    priorityScore,
+    urgencyReason: `Replenishing ${medicineName}. Current stock: ${currentStock} (Threshold: ${minThreshold}). Fulfilled via ${source}.`
+  };
+
+  db.procurementOrders.push(newOrder);
+
+  res.json({
+    success: true,
+    db,
+    order: newOrder
+  });
+});
+
+// API Route: Update Procurement Dispatch/Delivery Status
+app.post("/api/admin/update-procurement", (req, res) => {
+  const { orderId, status, dispatchStatus } = req.body;
+  const order = db.procurementOrders.find(o => o.id === orderId);
+  if (!order) return res.status(404).json({ error: "Order not found." });
+
+  order.status = status || order.status;
+  order.dispatchStatus = dispatchStatus || order.dispatchStatus;
+
+  if (status === "Delivered") {
+    order.dispatchStatus = "Arrived";
+    order.estimatedDelivery = "Delivered";
+
+    // Deliver to facility
+    const facility = db.facilities.find(f => f.id === order.facilityId);
+    if (facility) {
+      if (order.isCritical) {
+        if (facility.criticalInventory && facility.criticalInventory[order.medicineId]) {
+          facility.criticalInventory[order.medicineId].stock += order.quantity;
+          facility.criticalInventory[order.medicineId].lastSupplyDate = new Date().toISOString().split('T')[0];
+        }
+      } else {
+        if (facility.inventory[order.medicineId] !== undefined) {
+          facility.inventory[order.medicineId] += order.quantity;
+        }
+      }
+    }
+
+    // Deduct from district store if that was the source
+    if (order.source === "District Store") {
+      if (db.districtStore[order.medicineId] >= order.quantity) {
+        db.districtStore[order.medicineId] -= order.quantity;
+      }
+    }
+  } else if (status === "Dispatched") {
+    order.dispatchStatus = "In Transit";
+    order.estimatedDelivery = "En Route (2 Hours)";
+  }
+
+  res.json({
+    success: true,
+    db,
+    order
+  });
+});
+
+// API Route: Direct Dispatch from District Store to PHC/CHC
+app.post("/api/admin/dispatch-from-store", (req, res) => {
+  const { facilityId, medicineId, quantity } = req.body;
+  if (!facilityId || !medicineId || !quantity) {
+    return res.status(400).json({ error: "Missing facilityId, medicineId, or quantity." });
+  }
+
+  const facility = db.facilities.find(f => f.id === facilityId);
+  if (!facility) {
+    return res.status(404).json({ error: "Facility not found." });
+  }
+
+  const storeQty = db.districtStore[medicineId] || 0;
+  if (storeQty < quantity) {
+    return res.status(400).json({ error: `Insufficient stock in District Store. Only ${storeQty} units available.` });
+  }
+
+  // Deduct from district store and add to facility
+  db.districtStore[medicineId] -= Number(quantity);
+  if (facility.inventory[medicineId] !== undefined) {
+    facility.inventory[medicineId] += Number(quantity);
+  } else {
+    facility.inventory[medicineId] = Number(quantity);
+  }
+
+  // Log as a completed procurement order for auditing
+  const newOrderId = `ord-trans-${db.procurementOrders.length + 1}`;
+  const med = db.medicines[medicineId];
+  const newOrder: ProcurementOrder = {
+    id: newOrderId,
+    facilityId,
+    facilityName: facility.name,
+    medicineId,
+    medicineName: med ? med.name : medicineId,
+    isCritical: false,
+    quantity: Number(quantity),
+    source: "District Store",
+    supplierName: "District Central Warehouse",
+    status: "Delivered",
+    dispatchStatus: "Arrived",
+    shipmentTracking: `TRK-STO-${Math.floor(1000 + Math.random() * 9000)}`,
+    estimatedDelivery: "Delivered (Direct Store Transfer)",
+    priorityScore: 50,
+    urgencyReason: `Optimized Store Dispatch by Admin. Low stock resolved instantly, bypassing regional logistics routing.`
+  };
+
+  db.procurementOrders.push(newOrder);
+
+  res.json({
+    success: true,
+    db,
+    message: `Successfully dispatched and transferred ${quantity} units of ${med?.name || medicineId} directly from District Store to ${facility.name}.`
+  });
+});
+
+// API Route: Direct Purchase from Vendor and Ship Directly to PHC/CHC
+app.post("/api/admin/direct-purchase", (req, res) => {
+  const { facilityId, medicineId, quantity } = req.body;
+  if (!facilityId || !medicineId || !quantity) {
+    return res.status(400).json({ error: "Missing facilityId, medicineId, or quantity." });
+  }
+
+  const facility = db.facilities.find(f => f.id === facilityId);
+  if (!facility) {
+    return res.status(404).json({ error: "Facility not found." });
+  }
+
+  // Deliver directly to facility
+  if (facility.inventory[medicineId] !== undefined) {
+    facility.inventory[medicineId] += Number(quantity);
+  } else {
+    facility.inventory[medicineId] = Number(quantity);
+  }
+
+  // Log as a completed procurement order
+  const newOrderId = `ord-direct-${db.procurementOrders.length + 1}`;
+  const med = db.medicines[medicineId];
+  const newOrder: ProcurementOrder = {
+    id: newOrderId,
+    facilityId,
+    facilityName: facility.name,
+    medicineId,
+    medicineName: med ? med.name : medicineId,
+    isCritical: false,
+    quantity: Number(quantity),
+    source: "Direct Purchase",
+    supplierName: "Apex Life Suppliers",
+    status: "Delivered",
+    dispatchStatus: "Arrived",
+    shipmentTracking: `TRK-DIR-${Math.floor(1000 + Math.random() * 9000)}`,
+    estimatedDelivery: "Delivered (Direct Vendor Shipment)",
+    priorityScore: 70,
+    urgencyReason: `Direct Supplier Purchase ordered by Admin. Shipped directly from manufacturer to ${facility.name} to minimize shipping times and regional warehouse overhead.`
+  };
+
+  db.procurementOrders.push(newOrder);
+
+  res.json({
+    success: true,
+    db,
+    message: `Successfully purchased ${quantity} units of ${med?.name || medicineId} from Apex Life Suppliers, shipped directly to ${facility.name}.`
+  });
+});
+
+// API Route: AI Diagnostics test suggestions based on symptoms
+app.post("/api/doctor/recommend-investigations", async (req, res) => {
+  const { patientId, symptoms, vitals } = req.body;
+  const patient = db.patients.find(p => p.id === patientId);
+  const finalSymptoms = symptoms || patient?.symptoms || "Unknown symptoms";
+
+  if (ai) {
+    try {
+      const prompt = `
+        You are an expert Clinical AI Diagnostic Advisory Assistant.
+        Analyze the patient profile and symptoms:
+        Patient Name: ${patient?.name || "Anonymous"}
+        Age: ${patient?.age || "N/A"}
+        Gender: ${patient?.gender || "N/A"}
+        Symptoms: ${finalSymptoms}
+        Vitals (if provided): ${JSON.stringify(vitals || {})}
+
+        Recommend the top 2 to 3 most relevant laboratory or diagnostic tests.
+        Provide a professional clinical rationale for each recommendation.
+        Ensure the tone is advisory and educational ("Advisory only - final clinical decision rests with the doctor").
+
+        Return ONLY a JSON response matching this TypeScript structure (do not include markdown block, purely valid JSON):
+        [
+          {
+            "testId": "cbc" | "lft" | "kft" | "dengue" | "malaria" | "sugar" | "ultrasound",
+            "testName": "Complete Blood Count (CBC)",
+            "rationale": "Clinical reason for testing based on symptoms",
+            "severity": "High" | "Medium" | "Routine"
+          }
+        ]
+      `;
+
+      const text = await generateTextWithFallback(ai, prompt, "application/json");
+      const recommended = JSON.parse(text.trim() || "[]");
+      return res.json({ success: true, recommendations: recommended });
+    } catch (err) {
+      console.log("Gemini diagnostic advisor failed, executing rule-based clinical recommender.");
+    }
+  }
+
+  // Fallback rule-based diagnostic suggestions based on symptoms
+  const symLower = finalSymptoms.toLowerCase();
+  const recs = [];
+
+  if (symLower.includes("fever") || symLower.includes("chill") || symLower.includes("shiver")) {
+    recs.push({
+      testId: "malaria",
+      testName: "Malaria Smear",
+      rationale: "Rule out Plasmodium infection given persistent high fever and chills.",
+      severity: "High"
+    });
+    recs.push({
+      testId: "dengue",
+      testName: "Dengue NS1 Antigen",
+      rationale: "Assess Dengue viral markers due to acute fever surge.",
+      severity: "High"
+    });
+    recs.push({
+      testId: "cbc",
+      testName: "Complete Blood Count (CBC)",
+      rationale: "Monitor platelet and white blood cell levels for hematological response.",
+      severity: "Medium"
+    });
+  } else if (symLower.includes("vomit") || symLower.includes("diarrhea") || symLower.includes("stomach") || symLower.includes("abdominal")) {
+    recs.push({
+      testId: "cbc",
+      testName: "Complete Blood Count (CBC)",
+      rationale: "Evaluate infective signs or dehydration-related hemoconcentration.",
+      severity: "Medium"
+    });
+    recs.push({
+      testId: "lft",
+      testName: "Liver Function Test (LFT)",
+      rationale: "Rule out acute hepatic inflammation or biliary pathology.",
+      severity: "Routine"
+    });
+  } else if (symLower.includes("pregnant") || symLower.includes("pregnancy") || symLower.includes("gestation") || symLower.includes("trimester")) {
+    recs.push({
+      testId: "ultrasound",
+      testName: "Obstetric Ultrasound",
+      rationale: "Assess fetal viability, gestational age, and amniotic fluid levels.",
+      severity: "High"
+    });
+    recs.push({
+      testId: "sugar",
+      testName: "Blood Sugar (HbA1c)",
+      rationale: "Screen for gestational diabetes mellitus.",
+      severity: "Medium"
+    });
+  } else {
+    recs.push({
+      testId: "cbc",
+      testName: "Complete Blood Count (CBC)",
+      rationale: "General clinical screen for basic baseline evaluation.",
+      severity: "Routine"
+    });
+    recs.push({
+      testId: "sugar",
+      testName: "Blood Sugar (HbA1c)",
+      rationale: "Assess basic metabolic state and glycemic index.",
+      severity: "Routine"
+    });
+  }
+
+  res.json({ success: true, recommendations: recs });
+});
+
+// API Route: Update Lab Investigation status and reagent/workloads
+app.post("/api/admin/update-lab-status", (req, res) => {
+  const { facilityId, testId, status, machineStatus, reagentAvailability, pendingSamples } = req.body;
+  if (!facilityId || !testId) {
+    return res.status(400).json({ error: "Missing facilityId or testId." });
+  }
+
+  const facility = db.facilities.find(f => f.id === facilityId);
+  if (!facility || !facility.labInvestigations) {
+    return res.status(404).json({ error: "Facility or lab investigations not found." });
+  }
+
+  const test = facility.labInvestigations[testId];
+  if (!test) {
+    return res.status(404).json({ error: "Test investigation template not found." });
+  }
+
+  test.status = status || test.status;
+  test.machineStatus = machineStatus || test.machineStatus;
+  test.reagentAvailability = reagentAvailability || test.reagentAvailability;
+  if (pendingSamples !== undefined) {
+    test.pendingSamples = Number(pendingSamples);
+  }
+
+  // AI Workload and Diagnostic Forecasting Engine
+  if (test.machineStatus === "Under Maintenance") {
+    test.status = "Maintenance";
+    test.expectedAvailabilityTime = "8 Hours (AI Ref: Calibration calibration in progress)";
+  } else if (test.machineStatus === "Down") {
+    test.status = "Unavailable";
+    test.expectedAvailabilityTime = testId === "ultrasound" 
+      ? "48 Hours (AI Ref: Sonologist booking scheduled)" 
+      : "24 Hours (AI Ref: Bio-med engineer dispatched)";
+  } else if (test.reagentAvailability === "Out of Stock") {
+    test.status = "Reagents Out of Stock";
+    test.expectedAvailabilityTime = "12 Hours (AI Ref: Direct supply dispatch from District Store)";
+  } else if (test.reagentAvailability === "Low") {
+    test.status = "Limited Slots";
+    test.expectedAvailabilityTime = "4 Hours (AI Ref: Conserving resources for critical cases)";
+  } else {
+    test.status = "Available";
+    const waitMinutes = Math.max(15, test.pendingSamples * 12);
+    const hours = Math.floor(waitMinutes / 60);
+    const mins = waitMinutes % 60;
+    test.expectedAvailabilityTime = hours > 0 
+      ? `${hours}h ${mins}m (AI Ref: ${test.pendingSamples} in queue)` 
+      : `${mins} mins (AI Ref: Light lab workload)`;
+  }
+
+  res.json({
+    success: true,
+    db,
+    test
+  });
+});
+
+// API Route: Request Emergency Ambulance dispatch
+app.post("/api/patient/request-ambulance", (req, res) => {
+  const { patientId, location, destination, patientStatus } = req.body;
+
+  const ambulance = db.ambulances.find(a => a.status === "Available") || db.ambulances[0];
+  if (!ambulance) {
+    return res.status(400).json({ error: "All ambulances are currently busy." });
+  }
+
+  const patientName = patientId ? db.patients.find(p => p.id === patientId)?.name : "Emergency Walk-in";
+
+  ambulance.status = "En-Route";
+  ambulance.location = `${location} -> ${destination}`;
+  ambulance.assignedPatientId = patientId || "emergency";
+  ambulance.assignedPatientName = patientName;
+  ambulance.patientStatus = patientStatus || "Critical Emergency";
+  ambulance.eta = "12 mins";
+  ambulance.latitude = 400;
+  ambulance.longitude = 150;
+
+  res.json({
+    success: true,
+    db,
+    ambulance,
+    message: `Ambulance ${ambulance.plateNumber} has been dispatched immediately. Driver ${ambulance.driverName} is en route.`
+  });
 });
 
 // API Route: Patient OPD ticket booking (AI symptom classification & translation)

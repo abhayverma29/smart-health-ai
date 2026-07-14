@@ -7,12 +7,55 @@ export interface Medicine {
   category: string;
 }
 
+export interface CriticalDrug {
+  id: string;
+  name: string;
+  stock: number;
+  minThreshold: number;
+  expiryDate: string;
+  batchNumber: string;
+  supplier: string;
+  lastSupplyDate: string;
+  dailyConsumption: number;
+}
+
+export interface LabInvestigation {
+  id: string;
+  name: string;
+  status: "Available" | "Unavailable" | "Limited Slots" | "Maintenance" | "Reagents Out of Stock";
+  machineStatus: "Operational" | "Under Maintenance" | "Down";
+  reagentAvailability: "Adequate" | "Low" | "Out of Stock";
+  dailyCapacity: number;
+  pendingSamples: number;
+  expectedAvailabilityTime?: string;
+}
+
+export interface ProcurementOrder {
+  id: string;
+  facilityId: string;
+  facilityName: string;
+  medicineId: string;
+  medicineName: string;
+  isCritical: boolean;
+  quantity: number;
+  source: "District Store" | "Direct Purchase";
+  supplierName: string;
+  status: "Pending" | "Dispatched" | "Delivered";
+  dispatchStatus: "Awaiting Dispatch" | "In Transit" | "Arrived";
+  shipmentTracking: string;
+  estimatedDelivery: string;
+  priorityScore: number;
+  urgencyReason: string;
+}
+
 export interface Facility {
   id: string;
   name: string;
   type: "PHC" | "CHC";
   distance: number;
   inventory: Record<string, number>;
+  criticalInventory?: Record<string, CriticalDrug>;
+  labInvestigations?: Record<string, LabInvestigation>;
 }
 
 export interface Bed {
@@ -69,6 +112,15 @@ export interface Ambulance {
   status: "Available" | "En-Route" | "Maintenance";
   location: string;
   assignedPatientId: string | null;
+  latitude?: number;
+  longitude?: number;
+  eta?: string;
+  patientStatus?: string;
+  assignedPatientName?: string | null;
+  driverName?: string;
+  driverPhone?: string;
+  responseTimes?: number[];
+  fuelLevel?: number;
 }
 
 export interface AIWarning {

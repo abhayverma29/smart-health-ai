@@ -19,9 +19,10 @@ import {
   Bell,
   Mic,
   MicOff,
-  Volume2
+  Volume2,
+  Check
 } from "lucide-react";
-import { TRANSLATIONS, Doctor, Patient, Facility, Medicine } from "../types";
+import { TRANSLATIONS, Doctor, Patient, Facility, Medicine, LabInvestigation } from "../types";
 
 interface DoctorDashboardProps {
   doctors: Doctor[];
@@ -100,6 +101,16 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   
   const [prescriptionSuccess, setPrescriptionSuccess] = useState<string | null>(null);
   const [referralError, setReferralError] = useState<string | null>(null);
+
+  // Diagnostic Recommendation and Ambulance Dispatch States
+  const [diagnosticRecs, setDiagnosticRecs] = useState<any[]>([]);
+  const [loadingDiagnosticRecs, setLoadingDiagnosticRecs] = useState(false);
+  const [diagnosticNotice, setDiagnosticNotice] = useState<string | null>(null);
+  const [dispatchedAmbulance, setDispatchedAmbulance] = useState<any | null>(null);
+  const [dispatchingAmbulance, setDispatchingAmbulance] = useState(false);
+  const [ambulancePatientStatus, setAmbulancePatientStatus] = useState("Critical Emergency");
+  const [ambulanceDestination, setAmbulanceDestination] = useState("District Head Hospital");
+  const [extraReports, setExtraReports] = useState<Record<string, any[]>>({});
 
   // Global Voice Command Interface States
   const [voiceActive, setVoiceActive] = useState(false);
@@ -341,6 +352,8 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   // Reset dosage advice on patient change
   useEffect(() => {
     setSuggestedDosageAdvisory(null);
+    setDispatchedAmbulance(null);
+    setDiagnosticNotice(null);
     if (activePatient) {
       if (activePatient.age <= 2) setPatientWeight("12");
       else if (activePatient.age <= 5) setPatientWeight("18");
@@ -349,6 +362,29 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
 
       const prevMeds = activePatient.prescribedMeds.map(m => m.name).join(", ");
       setPatientHistory(prevMeds || "None registered");
+
+      // Auto-fetch clinical diagnostics recommendations
+      const fetchDiagnosticRecommendations = async () => {
+        setLoadingDiagnosticRecs(true);
+        setDiagnosticRecs([]);
+        try {
+          const res = await fetch("/api/doctor/recommend-investigations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ patientId: activePatient.id, symptoms: activePatient.symptoms })
+          });
+          const data = await res.json();
+          if (data && data.success) {
+            setDiagnosticRecs(data.recommendations || []);
+          }
+        } catch (err) {
+          console.error("Failed to load clinical recommendations", err);
+        } finally {
+          setLoadingDiagnosticRecs(false);
+        }
+      };
+
+      fetchDiagnosticRecommendations();
     }
   }, [selectedPatientId]);
 
@@ -1000,7 +1036,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                   <div>
                     <span className="font-bold text-slate-500 uppercase tracking-wide block mb-1.5">Lab diagnostics & vitals:</span>
                     <div className="space-y-1.5">
-                      {activePatient.reports.map((rep, idx) => (
+                      {[...(activePatient.reports || []), ...(extraReports[activePatient.id] || [])].map((rep, idx) => (
                         <div key={idx} className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg flex justify-between items-center text-[11px]">
                           <span>🧪 {rep.testName}</span>
                           <span className={`font-semibold ${
@@ -1028,10 +1064,10 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
             </div>
 
             {/* Action panel toggle: Prescribe Meds vs Cross-referral Bed booking */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               
               {/* Write Prescription Form */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm lg:col-span-1">
                 <div className="flex items-center space-x-2 pb-4 border-b border-slate-100 mb-4">
                   <FilePlus className="h-5 w-5 text-indigo-600" />
                   <h4 className="font-bold text-slate-800 font-sans">{t.prescribeMed}</h4>
@@ -1204,43 +1240,194 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                 )}
               </div>
 
-              {/* Cross-Hospital Emergency Referral Booking */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-                <div className="flex items-center space-x-2 pb-4 border-b border-slate-100 mb-4">
-                  <Truck className="h-5 w-5 text-indigo-600" />
-                  <h4 className="font-bold text-slate-800 font-sans">{t.crossReferral}</h4>
+              {/* Cross-Hospital Emergency Referral Booking & Live Beds Table */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm lg:col-span-2 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 gap-4">
+                  <div className="flex items-center space-x-2">
+                    <Truck className="h-5 w-5 text-indigo-600 animate-pulse" />
+                    <h4 className="font-bold text-slate-800 font-sans">{t.crossReferral}</h4>
+                  </div>
+                  <span className="bg-rose-50 text-rose-700 border border-rose-100 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0 uppercase tracking-wide">
+                    <span className="h-1.5 w-1.5 bg-rose-500 rounded-full animate-ping"></span> Live Bed Telemetry
+                  </span>
                 </div>
 
-                <form onSubmit={handleReferralSubmit} className="space-y-4 font-sans text-xs">
+                {/* REAL-TIME DEPARTMENT-WISE BED AVAILABILITY TABLE */}
+                <div className="space-y-3 font-sans">
                   <div>
-                    <label className="block text-slate-500 uppercase tracking-wider font-bold mb-1">{t.targetCenter}</label>
-                    <select
-                      id="referral-target-select"
-                      value={targetFacilityId}
-                      onChange={(e) => setTargetFacilityId(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none cursor-pointer"
-                    >
-                      {facilities.filter(f => f.id !== activeDoc?.facilityId).map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {f.name} ({f.distance}km away)
-                        </option>
-                      ))}
-                    </select>
+                    <h5 className="font-bold text-xs text-slate-700 uppercase tracking-wider">Live Neighboring Facilities Ward Occupancy</h5>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Select any available cell directly below to auto-populate the target facility and specialized ward.
+                    </p>
                   </div>
 
-                  <div>
-                    <label className="block text-slate-500 uppercase tracking-wider font-bold mb-1">Target Specialized Ward</label>
-                    <select
-                      id="referral-ward-select"
-                      value={targetDepartment}
-                      onChange={(e) => setTargetDepartment(e.target.value)}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none cursor-pointer"
-                    >
-                      <option value="General">General Ward Bed</option>
-                      <option value="ICU">Critical Care / ICU Bed</option>
-                      <option value="Pediatric">Pediatric Ward Bed</option>
-                      <option value="Maternity">Maternity/Gynecology Bed</option>
-                    </select>
+                  <div className="overflow-x-auto border border-slate-150 rounded-xl">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-150 text-[10px] text-slate-500 uppercase font-black tracking-wider font-mono">
+                          <th className="py-2.5 px-3">Neighboring Facility</th>
+                          <th className="py-2.5 px-3 text-center">General Ward</th>
+                          <th className="py-2.5 px-3 text-center">ICU Ward</th>
+                          <th className="py-2.5 px-3 text-center">Pediatric Ward</th>
+                          <th className="py-2.5 px-3 text-center">Maternity Ward</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {facilities
+                          .filter((f) => f.id !== activeDoc?.facilityId)
+                          .map((f) => {
+                            const neighborBeds = beds[f.id] || [];
+                            
+                            const getBedCell = (dept: "General" | "ICU" | "Pediatric" | "Maternity") => {
+                              const b = neighborBeds.find((x) => x.department === dept);
+                              if (!b) {
+                                return (
+                                  <td key={dept} className="py-2.5 px-2 text-center text-slate-300 bg-slate-50/40 text-[10px] font-mono font-bold select-none">
+                                    N/A
+                                  </td>
+                                );
+                              }
+
+                              const available = b.total - b.occupied;
+                              const isSelected = targetFacilityId === f.id && targetDepartment === dept;
+
+                              if (available === 0) {
+                                return (
+                                  <td key={dept} className="py-2.5 px-2 text-center bg-red-50/20 text-red-600 font-sans border-l border-slate-100/60">
+                                    <span className="text-[9px] font-black uppercase tracking-wider block">FULL</span>
+                                    <span className="text-[8px] text-slate-400 font-mono block">{b.occupied}/{b.total} Beds</span>
+                                  </td>
+                                );
+                              }
+
+                              const isLow = available <= 2;
+                              const statusColor = isLow 
+                                ? isSelected ? "bg-amber-100 border-amber-400 text-amber-800" : "bg-amber-50 text-amber-700 border-amber-100 hover:bg-amber-100/40"
+                                : isSelected ? "bg-indigo-50 border-indigo-400 text-indigo-800" : "bg-emerald-50 text-emerald-700 border-emerald-100 hover:bg-emerald-100/40";
+
+                              return (
+                                <td 
+                                  key={dept} 
+                                  onClick={() => {
+                                    setTargetFacilityId(f.id);
+                                    setTargetDepartment(dept);
+                                  }}
+                                  className={`py-2.5 px-2 text-center cursor-pointer transition-all border-l border-slate-100/60 border ${statusColor} ${
+                                    isSelected ? "ring-2 ring-indigo-500/30 font-extrabold scale-[1.01]" : ""
+                                  }`}
+                                >
+                                  <span className="text-[10px] font-bold block flex items-center justify-center gap-0.5">
+                                    {available} Free {isSelected && <Check className="h-2.5 w-2.5 text-indigo-600 inline shrink-0" />}
+                                  </span>
+                                  <span className="text-[8px] text-slate-500 font-mono block">{b.occupied}/{b.total} Beds</span>
+                                </td>
+                              );
+                            };
+
+                            return (
+                              <tr key={f.id} className="hover:bg-slate-50/50 transition">
+                                <td className="py-3 px-3 font-sans">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-slate-800 text-[11px] block truncate max-w-[150px]">{f.name}</span>
+                                    <span className="text-[8px] font-extrabold bg-slate-100 text-slate-500 px-1 py-0.2 rounded uppercase shrink-0">
+                                      {f.type}
+                                    </span>
+                                  </div>
+                                  <span className="text-[9px] text-slate-400 font-mono font-bold block mt-0.5">
+                                    📍 {f.distance} km away
+                                  </span>
+                                </td>
+                                {getBedCell("General")}
+                                {getBedCell("ICU")}
+                                {getBedCell("Pediatric")}
+                                {getBedCell("Maternity")}
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Selected Action Indicator & Guidance */}
+                {activePatient ? (
+                  <div className="bg-indigo-50/50 border border-indigo-100/70 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-xs font-sans">
+                    <div className="space-y-1">
+                      <span className="text-[9px] text-indigo-600 font-mono font-bold uppercase tracking-wider block">Decision Support Guidance</span>
+                      <p className="text-indigo-900 font-medium leading-relaxed">
+                        Ready to refer patient <strong className="text-indigo-950 font-extrabold">{activePatient.name}</strong> ({activePatient.age}Y • {activePatient.gender}) to:
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2 mt-1">
+                        <span className="bg-indigo-600 text-white font-extrabold text-[10px] px-2 py-0.5 rounded-md font-mono">
+                          {facilities.find(f => f.id === targetFacilityId)?.name || "Select target..."}
+                        </span>
+                        <span className="text-indigo-400 font-black">→</span>
+                        <span className="bg-indigo-100 text-indigo-800 font-extrabold text-[10px] px-2 py-0.5 rounded-md uppercase font-mono">
+                          {targetDepartment} Ward
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <div className="shrink-0">
+                      {(() => {
+                        const bList = beds[targetFacilityId] || [];
+                        const b = bList.find(x => x.department === targetDepartment);
+                        const av = b ? b.total - b.occupied : 0;
+                        if (av > 0) {
+                          return (
+                            <span className="text-emerald-700 bg-emerald-100 border border-emerald-200 text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 uppercase tracking-wider">
+                              <CheckCircle className="h-3.5 w-3.5 text-emerald-600" /> SECURED & AVAILABLE
+                            </span>
+                          );
+                        } else {
+                          return (
+                            <span className="text-red-700 bg-red-100 border border-red-200 text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 uppercase tracking-wider animate-pulse">
+                              <AlertTriangle className="h-3.5 w-3.5 text-red-600" /> SELECTED WARD FULL
+                            </span>
+                          );
+                        }
+                      })()}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl text-center text-xs text-slate-500 font-sans italic">
+                    ⚠️ <strong>No Active Patient Selected:</strong> Please select an awaiting consultation patient from the "My Patients" queue list first to construct their referral order.
+                  </div>
+                )}
+
+                {/* REFERRAL SUBMIT FORM */}
+                <form onSubmit={handleReferralSubmit} className="space-y-4 font-sans text-xs pt-2">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-slate-500 uppercase tracking-wider font-bold mb-1">{t.targetCenter}</label>
+                      <select
+                        id="referral-target-select"
+                        value={targetFacilityId}
+                        onChange={(e) => setTargetFacilityId(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none cursor-pointer font-bold"
+                      >
+                        {facilities.filter(f => f.id !== activeDoc?.facilityId).map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.name} ({f.distance}km away)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-500 uppercase tracking-wider font-bold mb-1">Target Specialized Ward</label>
+                      <select
+                        id="referral-ward-select"
+                        value={targetDepartment}
+                        onChange={(e) => setTargetDepartment(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none cursor-pointer font-bold"
+                      >
+                        <option value="General">General Ward Bed</option>
+                        <option value="ICU">Critical Care / ICU Bed</option>
+                        <option value="Pediatric">Pediatric Ward Bed</option>
+                        <option value="Maternity">Maternity/Gynecology Bed</option>
+                      </select>
+                    </div>
                   </div>
 
                   <div>
@@ -1251,15 +1438,15 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                       value={referralReason}
                       onChange={(e) => setReferralReason(e.target.value)}
                       placeholder="Specify critical symptoms justifying higher center bed allocation"
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none"
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-800 outline-none font-medium"
                     ></textarea>
                   </div>
 
                   <button
                     id="submit-referral-btn"
                     type="submit"
-                    disabled={referring || !targetFacilityId}
-                    className="w-full bg-red-500 hover:bg-red-600 disabled:bg-red-300 text-white font-bold py-2.5 rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-2"
+                    disabled={referring || !targetFacilityId || !activePatient}
+                    className="w-full bg-red-500 hover:bg-red-600 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-extrabold py-2.5 rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-2"
                   >
                     {referring ? (
                       <>
@@ -1286,6 +1473,288 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                   <div className="bg-rose-50 border border-rose-100 text-rose-800 rounded-xl p-3 mt-3 animate-fadeIn text-[11px] font-sans flex items-start gap-2">
                     <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
                     <p>{referralError}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* AI Clinical Diagnostic Recommendations Panel */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm col-span-1 lg:col-span-3 space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div className="flex items-center space-x-2">
+                    <Sparkles className="h-5 w-5 text-indigo-600 animate-pulse" />
+                    <h4 className="font-extrabold text-slate-900 font-sans text-sm tracking-tight">AI Clinical Diagnostic Recommendations</h4>
+                  </div>
+                  <span className="bg-teal-50 text-teal-700 border border-teal-150 text-[9px] px-2 py-0.5 rounded-full font-bold uppercase">Clinical Advisory</span>
+                </div>
+
+                <div className="bg-indigo-50/40 border border-indigo-100 rounded-xl p-3 text-[11px] text-indigo-800 font-medium">
+                  ⚠️ <strong>Disclaimer:</strong> All recommendations are advisory only. The on-duty doctor retains sole clinical authority and final decision-making power for all test orders.
+                </div>
+
+                {loadingDiagnosticRecs ? (
+                  <div className="py-8 text-center space-y-2 flex flex-col items-center justify-center">
+                    <Brain className="h-8 w-8 text-indigo-400 animate-spin" />
+                    <span className="text-xs text-slate-400 font-medium">Analyzing symptoms with medical diagnostic guidelines...</span>
+                  </div>
+                ) : diagnosticRecs.length === 0 ? (
+                  <p className="text-xs text-slate-400 italic text-center py-4">No diagnostic test recommendations currently loaded.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {diagnosticRecs.map((rec) => {
+                      const isOrdered = (extraReports[activePatient.id] || []).some(
+                        (r) => r.testName === rec.testName
+                      );
+
+                      return (
+                        <div
+                          key={rec.testId}
+                          className="border border-slate-150 hover:border-slate-300 bg-slate-50/35 hover:bg-white rounded-xl p-4 flex flex-col justify-between transition-all space-y-3"
+                        >
+                          <div className="space-y-1.5">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-slate-800 font-sans">
+                                🧪 {rec.testName}
+                              </span>
+                              <span
+                                className={`text-[9px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wider ${
+                                  rec.severity === "High"
+                                    ? "bg-rose-50 text-rose-700 border-rose-100"
+                                    : rec.severity === "Medium"
+                                    ? "bg-amber-50 text-amber-700 border-amber-100"
+                                    : "bg-blue-50 text-blue-700 border-blue-100"
+                                }`}
+                              >
+                                {rec.severity} Severity
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 leading-relaxed font-sans">
+                              {rec.rationale}
+                            </p>
+                          </div>
+
+                          <button
+                            type="button"
+                            disabled={isOrdered}
+                            onClick={() => {
+                              const newTest = {
+                                testName: rec.testName,
+                                status: "Pending Collection",
+                              };
+                              setExtraReports((prev) => ({
+                                ...prev,
+                                [activePatient.id]: [...(prev[activePatient.id] || []), newTest],
+                              }));
+                              setDiagnosticNotice(`Successfully ordered: ${rec.testName}`);
+                              speakFeedback(`Authorized and ordered ${rec.testName} for ${activePatient.name}`);
+                              setTimeout(() => setDiagnosticNotice(null), 4000);
+                            }}
+                            className={`w-full py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                              isOrdered
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-150"
+                                : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs"
+                            }`}
+                          >
+                            {isOrdered ? (
+                              <>
+                                <CheckCircle className="h-3.5 w-3.5" />
+                                <span>Authorized & Ordered</span>
+                              </>
+                            ) : (
+                              <>
+                                <Plus className="h-3.5 w-3.5" />
+                                <span>Authorize & Order Test</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {diagnosticNotice && (
+                  <div className="bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl p-3 text-[11px] font-sans flex items-center gap-1.5 animate-fadeIn">
+                    <CheckCircle className="h-4 w-4 text-emerald-600" />
+                    <span>{diagnosticNotice}</span>
+                  </div>
+                )}
+
+                {/* Real-time Facility Laboratory Status Board */}
+                {(() => {
+                  const currentClinic = facilities.find(f => f.id === activePatient?.facilityId) || facilities.find(f => f.id === doctors.find(d => d.id === selectedDocId)?.facilityId) || facilities[0];
+
+                  return (
+                    <div className="pt-5 border-t border-slate-150 mt-4 space-y-3 font-sans text-left">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h5 className="font-extrabold text-slate-800 text-xs flex items-center gap-1.5 uppercase tracking-wide">
+                            🔬 Real-Time Clinic Laboratory Investigation Desk
+                          </h5>
+                          <p className="text-[10px] text-slate-400 mt-0.5">Live monitoring of diagnostic capabilities at {currentClinic?.name || "Local Clinic"}.</p>
+                        </div>
+                        <span className="h-2.5 w-2.5 bg-emerald-500 rounded-full animate-ping shrink-0" title="Live status syncing active"></span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        {currentClinic?.labInvestigations && (Object.values(currentClinic.labInvestigations) as LabInvestigation[]).map((test) => {
+                          let statusBadgeColor = "bg-emerald-50 text-emerald-700 border-emerald-150";
+                          let statusText = test.status;
+
+                          if (test.status === "Unavailable" || test.status === "Maintenance" || test.status === "Reagents Out of Stock") {
+                            statusBadgeColor = "bg-rose-50 text-rose-700 border-rose-150";
+                          } else if (test.status === "Limited Slots") {
+                            statusBadgeColor = "bg-amber-50 text-amber-700 border-amber-150";
+                          }
+
+                          return (
+                            <div key={test.id} className="bg-slate-50 border border-slate-150 rounded-xl p-3 flex flex-col justify-between hover:border-slate-250 transition-all space-y-2">
+                              <div className="space-y-1">
+                                <span className="text-[9px] text-slate-400 font-mono font-bold block uppercase tracking-wider">LAB REFC: {test.id}</span>
+                                <span className="text-xs font-extrabold text-slate-800 block truncate" title={test.name}>{test.name}</span>
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded border font-mono ${statusBadgeColor}`}>
+                                    {statusText}
+                                  </span>
+                                  <span className="text-[8.5px] text-slate-400 font-mono font-bold shrink-0">
+                                    Queue: {test.pendingSamples}
+                                  </span>
+                                </div>
+
+                                {/* Show AI Forecast if not fully available */}
+                                {(test.status === "Unavailable" || test.status === "Maintenance" || test.status === "Reagents Out of Stock" || test.status === "Limited Slots") && test.expectedAvailabilityTime && (
+                                  <div className="bg-indigo-50 border border-indigo-100 rounded p-1.5 text-[8px] leading-tight text-indigo-800 font-medium font-mono">
+                                    <span className="font-extrabold block text-indigo-900">⏳ AI Forecast:</span>
+                                    {test.expectedAvailabilityTime}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Emergency Ambulance Dispatch Panel */}
+              <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm col-span-1 md:col-span-2 space-y-4">
+                <div className="flex items-center space-x-2 pb-3 border-b border-slate-100">
+                  <Truck className="h-5 w-5 text-indigo-600 shrink-0" />
+                  <h4 className="font-extrabold text-slate-900 font-sans text-sm tracking-tight">Emergency Ambulance Dispatch Desk</h4>
+                </div>
+
+                {!dispatchedAmbulance ? (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end font-sans text-xs">
+                    <div>
+                      <label className="block text-slate-500 uppercase tracking-wider font-bold mb-1.5">Ambulance Patient Status</label>
+                      <select
+                        value={ambulancePatientStatus}
+                        onChange={(e) => setAmbulancePatientStatus(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs text-slate-800 outline-none cursor-pointer font-medium"
+                      >
+                        <option value="Critical Emergency">Critical Emergency (Immediate Assist)</option>
+                        <option value="Severe Trauma">Severe Trauma (High Alert)</option>
+                        <option value="Stable Transfer">Stable Transfer (Routine OPD Shift)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-500 uppercase tracking-wider font-bold mb-1.5">Destination Specialization Center</label>
+                      <select
+                        value={ambulanceDestination}
+                        onChange={(e) => setAmbulanceDestination(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-xs text-slate-800 outline-none cursor-pointer font-medium"
+                      >
+                        <option value="District General Hospital">District General Hospital</option>
+                        <option value="Apex Cardiology CHC">Apex Specialized CHC</option>
+                        <option value="Regional Trauma Center">Regional Trauma Center</option>
+                      </select>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={dispatchingAmbulance}
+                      onClick={async () => {
+                        setDispatchingAmbulance(true);
+                        try {
+                          const res = await fetch("/api/patient/request-ambulance", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              patientId: activePatient.id,
+                              location: docFacility?.name || "Primary Health Centre",
+                              destination: ambulanceDestination,
+                              patientStatus: ambulancePatientStatus,
+                            }),
+                          });
+                          const data = await res.json();
+                          if (data && data.success) {
+                            setDispatchedAmbulance(data.ambulance);
+                            speakFeedback(`Ambulance dispatch authorized. Vehicle dispatched.`);
+                          }
+                        } catch (err) {
+                          console.error(err);
+                        } finally {
+                          setDispatchingAmbulance(false);
+                        }
+                      }}
+                      className="bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white font-extrabold py-3 px-4 rounded-xl text-xs transition cursor-pointer flex items-center justify-center gap-2 shadow-sm shadow-rose-600/10"
+                    >
+                      <Truck className="h-4 w-4 animate-pulse" />
+                      <span>{dispatchingAmbulance ? "Authorizing Dispatch..." : "Request Immediate Dispatch"}</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="bg-slate-900 text-white rounded-2xl p-5 border border-slate-800 space-y-4 font-sans animate-fadeIn relative overflow-hidden">
+                    {/* Glowing active radar ring */}
+                    <span className="absolute top-4 right-4 inline-flex h-3.5 w-3.5 rounded-full bg-emerald-500/20">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
+                    </span>
+
+                    <div className="border-b border-white/10 pb-3">
+                      <span className="text-[9px] text-teal-400 font-bold uppercase tracking-widest font-mono">LIVE DISPATCH TELEMETRY ACTIVE</span>
+                      <h5 className="text-sm font-bold text-white mt-1">Ambulance: {dispatchedAmbulance.plateNumber}</h5>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs font-mono">
+                      <div>
+                        <span className="text-[9px] text-slate-400 block font-bold">DRIVER INFORMATION</span>
+                        <span className="text-white font-bold block mt-0.5">{dispatchedAmbulance.driverName}</span>
+                        <span className="text-slate-400 text-[10px] block mt-0.5">📞 {dispatchedAmbulance.driverContact}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-400 block font-bold">DISPATCH LOCATION</span>
+                        <span className="text-white font-bold block mt-0.5 truncate">{dispatchedAmbulance.location}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-400 block font-bold">ESTIMATED ETA</span>
+                        <span className="text-amber-400 font-black block mt-0.5">{dispatchedAmbulance.eta}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-400 block font-bold">GPS COORDINATES</span>
+                        <span className="text-teal-400 font-bold block mt-0.5">LAT: {dispatchedAmbulance.latitude}.52 / LONG: {dispatchedAmbulance.longitude}.11</span>
+                      </div>
+                    </div>
+
+                    <div className="h-2.5 bg-white/5 rounded-full overflow-hidden border border-white/10 relative">
+                      <div className="h-full bg-gradient-to-r from-teal-400 to-indigo-500 w-1/3 animate-pulse"></div>
+                    </div>
+
+                    <div className="flex justify-between items-center text-[10px] text-slate-400 border-t border-white/5 pt-3">
+                      <span>Status: <strong className="text-emerald-400">En-Route</strong> (GPS Lock Verified)</span>
+                      <button
+                        type="button"
+                        onClick={() => setDispatchedAmbulance(null)}
+                        className="text-rose-400 hover:text-rose-300 font-extrabold cursor-pointer uppercase text-[9px] tracking-wider"
+                      >
+                        Dismiss Dispatch Feed
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
