@@ -104,6 +104,8 @@ export interface Patient {
     dosage: string;
     duration: string;
   }[];
+  diagnosis?: string;
+  complaints?: string;
 }
 
 export interface Ambulance {

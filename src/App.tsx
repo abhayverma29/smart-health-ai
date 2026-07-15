@@ -213,12 +213,12 @@ export default function App() {
   };
 
   // Action: Doctor Mark Patient as Seen
-  const handleMarkSeen = async (patientId: string) => {
+  const handleMarkSeen = async (patientId: string, diagnosis?: string, complaints?: string) => {
     try {
       const res = await fetch("/api/doctor/mark-seen", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ patientId })
+        body: JSON.stringify({ patientId, diagnosis, complaints })
       });
       const data = await res.json();
       if (data && data.success) {
@@ -227,6 +227,25 @@ export default function App() {
       }
     } catch (err) {
       console.error("Failed to mark patient as seen:", err);
+    }
+    return null;
+  };
+
+  // Action: Doctor Save Patient Clinical Notes (Diagnosis & Complaints)
+  const handleSaveNotes = async (patientId: string, diagnosis: string, complaints: string) => {
+    try {
+      const res = await fetch("/api/doctor/save-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patientId, diagnosis, complaints })
+      });
+      const data = await res.json();
+      if (data && data.success) {
+        await fetchState(); // Sync patient details change
+        return data;
+      }
+    } catch (err) {
+      console.error("Failed to save clinical notes:", err);
     }
     return null;
   };
@@ -352,6 +371,7 @@ export default function App() {
                 onPrescribe={handlePrescribeMeds}
                 onRefer={handleReferral}
                 onMarkSeen={handleMarkSeen}
+                onSaveNotes={handleSaveNotes}
                 activeDoctorId={session.doctorId}
               />
             )}

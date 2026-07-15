@@ -1041,7 +1041,7 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                       </div>
                       <div className="text-right shrink-0">
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full inline-block ${
-                          rep.status === "Ready" ? "bg-emerald-50 text-emerald-600 border border-emerald-100" : "bg-amber-50 text-amber-600 border border-amber-100"
+                           rep.status === "Ready" ? "bg-emerald-50 text-emerald-600 border border-emerald-100" : "bg-amber-50 text-amber-600 border border-amber-100"
                         }`}>
                           {rep.status === "Ready" ? t.statusReady : t.statusPending}
                         </span>
@@ -1058,6 +1058,31 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
                   ))
                 )}
               </div>
+
+              {/* Doctor's Consultation Notes (Diagnosis & Complaints) */}
+              {(activePatient.diagnosis || activePatient.complaints) && (
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl space-y-3 font-sans mt-4">
+                  <span className="text-[10px] font-black text-indigo-600 block uppercase tracking-wider font-mono">🩺 Doctor Consultation Notes</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    {activePatient.complaints && (
+                      <div className="space-y-1">
+                        <span className="font-bold text-slate-400 block text-[10px] uppercase">Recorded Complaints:</span>
+                        <p className="text-slate-700 bg-white border border-slate-100 p-2.5 rounded-lg italic">
+                          "{activePatient.complaints}"
+                        </p>
+                      </div>
+                    )}
+                    {activePatient.diagnosis && (
+                      <div className="space-y-1">
+                        <span className="font-bold text-slate-400 block text-[10px] uppercase">Official Diagnosis:</span>
+                        <p className="text-slate-800 bg-white border border-slate-100 p-2.5 rounded-lg font-semibold">
+                          {activePatient.diagnosis}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Prescribed Medications */}
               {activePatient.prescribedMeds.length > 0 && (

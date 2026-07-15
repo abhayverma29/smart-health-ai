@@ -165,6 +165,8 @@ interface Patient {
     dosage: string;
     duration: string;
   }[];
+  diagnosis?: string;
+  complaints?: string;
 }
 
 interface Ambulance {
@@ -271,7 +273,7 @@ const INITIAL_LAB_INVESTIGATIONS: Record<string, Record<string, LabInvestigation
 const INITIAL_FACILITIES: Facility[] = [
   {
     id: "fac-1",
-    name: "Central CHC  (Community Health Centre)",
+    name: "Saswad Sub-District Hospital (SDH)",
     type: "CHC",
     distance: 0,
     inventory: { "med-1": 650, "med-2": 450, "med-3": 350, "med-4": 550, "med-5": 500, "med-6": 800, "med-7": 90, "med-8": 25, "med-9": 20 },
@@ -280,7 +282,7 @@ const INITIAL_FACILITIES: Facility[] = [
   },
   {
     id: "fac-2",
-    name: "North PHC (Primary Health Centre)",
+    name: "Yawat PHC (Primary Health Centre)",
     type: "PHC",
     distance: 12,
     inventory: { "med-1": 150, "med-2": 80, "med-3": 40, "med-4": 150, "med-5": 120, "med-6": 300, "med-7": 10, "med-8": 5, "med-9": 2 }, // critical shortage
@@ -289,7 +291,7 @@ const INITIAL_FACILITIES: Facility[] = [
   },
   {
     id: "fac-3",
-    name: "East PHC (Primary Health Centre)",
+    name: "Wagholi PHC (Primary Health Centre)",
     type: "PHC",
     distance: 18,
     inventory: { "med-1": 320, "med-2": 210, "med-3": 180, "med-4": 220, "med-5": 250, "med-6": 320, "med-7": 40, "med-8": 12, "med-9": 6 },
@@ -298,7 +300,7 @@ const INITIAL_FACILITIES: Facility[] = [
   },
   {
     id: "fac-4",
-    name: "South PHC (Primary Health Centre)",
+    name: "Kedgaon PHC (Primary Health Centre)",
     type: "PHC",
     distance: 25,
     inventory: { "med-1": 80, "med-2": 60, "med-3": 30, "med-4": 80, "med-5": 80, "med-6": 80, "med-7": 10, "med-8": 3, "med-9": 2 }, // critical stock-out alerts
@@ -427,7 +429,7 @@ const INITIAL_AMBULANCES: Ambulance[] = [
     id: "amb-1",
     plateNumber: "MH-12-HE-5512",
     status: "Available",
-    location: "Central CHC (Community Health Centre)",
+    location: "Saswad Sub-District Hospital (SDH)",
     assignedPatientId: null,
     latitude: 400,
     longitude: 200,
@@ -440,7 +442,7 @@ const INITIAL_AMBULANCES: Ambulance[] = [
     id: "amb-2",
     plateNumber: "MH-12-HE-9944",
     status: "En-Route",
-    location: "North PHC -> Central CHC",
+    location: "Yawat PHC -> Saswad SDH",
     assignedPatientId: "pat-2",
     latitude: 400,
     longitude: 110,
@@ -456,7 +458,7 @@ const INITIAL_AMBULANCES: Ambulance[] = [
     id: "amb-3",
     plateNumber: "MH-12-HE-3311",
     status: "Available",
-    location: "South PHC (Primary Health Centre)",
+    location: "Kedgaon PHC (Primary Health Centre)",
     assignedPatientId: null,
     latitude: 400,
     longitude: 350,
@@ -547,8 +549,194 @@ let db = {
   ambulances: JSON.parse(JSON.stringify(INITIAL_AMBULANCES)) as Ambulance[],
   medicines: JSON.parse(JSON.stringify(MEDICINES)) as Record<string, Medicine>,
   districtStore: JSON.parse(JSON.stringify(INITIAL_DISTRICT_STORE)) as Record<string, number>,
-  procurementOrders: JSON.parse(JSON.stringify(INITIAL_PROCUREMENT_ORDERS)) as ProcurementOrder[]
+  procurementOrders: JSON.parse(JSON.stringify(INITIAL_PROCUREMENT_ORDERS)) as ProcurementOrder[],
+  ignoredWarningsCount: {} as Record<string, number>,
+  systemNotifications: [] as any[]
 };
+
+// AI Automated Procurement Auditor Engine
+function checkAndAutoProcure() {
+  if (!db.ignoredWarningsCount) {
+    db.ignoredWarningsCount = {};
+  }
+  if (!db.systemNotifications) {
+    db.systemNotifications = [];
+  }
+
+  db.facilities.forEach(facility => {
+    // 1. Check general medicines in facility.inventory
+    Object.keys(db.medicines).forEach(medId => {
+      const med = db.medicines[medId];
+      // Check if critical/life-saving medicine
+      const isLifeSaving = medId.startsWith("crit") || ["med-7", "med-8", "med-9"].includes(medId);
+      if (!isLifeSaving) return;
+
+      const stock = facility.inventory[medId] ?? 0;
+      const threshold = med.minThreshold;
+
+      // Check if there is already an active (Pending/Dispatched) order for this medicine at this facility
+      const hasActiveOrder = db.procurementOrders.some(order => 
+        order.facilityId === facility.id && 
+        order.medicineId === medId && 
+        (order.status === "Pending" || order.status === "Dispatched")
+      );
+
+      const warningKey = `${facility.id}-${medId}`;
+
+      if (stock <= threshold) {
+        if (!hasActiveOrder) {
+          // If warning is ignored (no active order), increment ignored warnings count
+          db.ignoredWarningsCount[warningKey] = (db.ignoredWarningsCount[warningKey] || 0) + 1;
+        }
+      } else {
+        // Reset warning count when stock becomes healthy
+        db.ignoredWarningsCount[warningKey] = 0;
+      }
+
+      // Very low stock threshold is reached if stock <= 50% of the threshold
+      const veryLowThreshold = Math.max(5, Math.floor(threshold * 0.5));
+
+      if (stock <= veryLowThreshold && !hasActiveOrder) {
+        // Ensure warning count has accumulated at least once, or mock it to represent "ignored warnings"
+        const timesIgnored = Math.max(2, db.ignoredWarningsCount[warningKey] || 2);
+        
+        const qtyToProcure = 250; // standard packet size
+        const districtStoreQty = db.districtStore[medId] || 0;
+        const useStore = districtStoreQty >= qtyToProcure;
+        const source = useStore ? "District Store" : "Direct Purchase";
+        const supplierName = useStore ? "District Central Warehouse" : "Apex Life Suppliers";
+
+        const orderId = `ord-auto-${db.procurementOrders.length + 1}`;
+        const newOrder: ProcurementOrder = {
+          id: orderId,
+          facilityId: facility.id,
+          facilityName: facility.name,
+          medicineId: medId,
+          medicineName: med.name,
+          isCritical: true,
+          quantity: qtyToProcure,
+          source,
+          supplierName,
+          status: "Pending",
+          dispatchStatus: "Awaiting Dispatch",
+          shipmentTracking: `AI-AUTO-TRK-${Math.floor(1000 + Math.random() * 9000)}`,
+          estimatedDelivery: useStore ? "In 1 Day" : "In 3 Days",
+          priorityScore: 100,
+          urgencyReason: `[AI AUTO-PROCURE OVERRIDE] Repeated low stock warnings (${timesIgnored} alerts) for life-saving medicine ${med.name} were ignored. Supply reached critically low stock (${stock}/${threshold} units left). AI initiated automated emergency procurement to prevent total stock-out.`
+        };
+
+        db.procurementOrders.push(newOrder);
+
+        // Deduct from District Store safely if that is the source
+        if (useStore) {
+          db.districtStore[medId] -= qtyToProcure;
+        }
+
+        // Generate a system notification for the District Administrator
+        const notifId = `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const notification = {
+          id: notifId,
+          timestamp: new Date().toISOString(),
+          facilityId: facility.id,
+          facilityName: facility.name,
+          type: "AI_AUTO_PROCURE",
+          message: `🚨 AI Auto-Procurement Active: Repeated warnings were ignored. Automated emergency order ${orderId} has been initiated for life-saving ${med.name} at ${facility.name} (${stock} units left, below 50% safety limit of ${threshold}).`,
+          medicineName: med.name,
+          stock,
+          threshold,
+          orderId,
+          read: false
+        };
+
+        db.systemNotifications.unshift(notification);
+        db.ignoredWarningsCount[warningKey] = 0; // reset counter after action taken
+      }
+    });
+
+    // 2. Check critical medicines in facility.criticalInventory
+    if (facility.criticalInventory) {
+      Object.keys(facility.criticalInventory).forEach(drugId => {
+        const drug = facility.criticalInventory![drugId];
+        const stock = drug.stock;
+        const threshold = drug.minThreshold;
+
+        const hasActiveOrder = db.procurementOrders.some(order => 
+          order.facilityId === facility.id && 
+          order.medicineId === drugId && 
+          (order.status === "Pending" || order.status === "Dispatched")
+        );
+
+        const warningKey = `${facility.id}-${drugId}`;
+
+        if (stock <= threshold) {
+          if (!hasActiveOrder) {
+            db.ignoredWarningsCount[warningKey] = (db.ignoredWarningsCount[warningKey] || 0) + 1;
+          }
+        } else {
+          db.ignoredWarningsCount[warningKey] = 0;
+        }
+
+        // Very low stock threshold is reached if stock <= 50% of the threshold
+        const veryLowThreshold = Math.max(5, Math.floor(threshold * 0.5));
+
+        if (stock <= veryLowThreshold && !hasActiveOrder) {
+          const timesIgnored = Math.max(2, db.ignoredWarningsCount[warningKey] || 2);
+          
+          const qtyToProcure = 100; // standard package for critical injectables
+          const districtStoreQty = db.districtStore[drugId] || 0;
+          const useStore = districtStoreQty >= qtyToProcure;
+          const source = useStore ? "District Store" : "Direct Purchase";
+          const supplierName = useStore ? "District Central Warehouse" : "Apex Life Suppliers";
+
+          const orderId = `ord-auto-${db.procurementOrders.length + 1}`;
+          const newOrder: ProcurementOrder = {
+            id: orderId,
+            facilityId: facility.id,
+            facilityName: facility.name,
+            medicineId: drugId,
+            medicineName: drug.name,
+            isCritical: true,
+            quantity: qtyToProcure,
+            source,
+            supplierName,
+            status: "Pending",
+            dispatchStatus: "Awaiting Dispatch",
+            shipmentTracking: `AI-AUTO-TRK-${Math.floor(1000 + Math.random() * 9000)}`,
+            estimatedDelivery: useStore ? "In 1 Day" : "In 3 Days",
+            priorityScore: 100,
+            urgencyReason: `[AI AUTO-PROCURE OVERRIDE] Repeated low stock warnings (${timesIgnored} alerts) for life-saving injectable ${drug.name} were ignored. Supply reached critically low stock (${stock}/${threshold} units left). AI initiated automated emergency procurement to prevent total stock-out.`
+          };
+
+          db.procurementOrders.push(newOrder);
+
+          // Deduct from District Store safely if that is the source
+          if (useStore) {
+            db.districtStore[drugId] -= qtyToProcure;
+          }
+
+          // Generate a system notification for the District Administrator
+          const notifId = `notif-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const notification = {
+            id: notifId,
+            timestamp: new Date().toISOString(),
+            facilityId: facility.id,
+            facilityName: facility.name,
+            type: "AI_AUTO_PROCURE",
+            message: `🚨 AI Auto-Procurement Active: Repeated warnings were ignored. Automated emergency order ${orderId} has been initiated for critical drug ${drug.name} at ${facility.name} (${stock} units left, below 50% safety limit of ${threshold}).`,
+            medicineName: drug.name,
+            stock,
+            threshold,
+            orderId,
+            read: false
+          };
+
+          db.systemNotifications.unshift(notification);
+          db.ignoredWarningsCount[warningKey] = 0; // reset
+        }
+      });
+    }
+  });
+}
 
 // API Route: Reset State
 app.post("/api/state/reset", (req, res) => {
@@ -560,14 +748,27 @@ app.post("/api/state/reset", (req, res) => {
     ambulances: JSON.parse(JSON.stringify(INITIAL_AMBULANCES)),
     medicines: JSON.parse(JSON.stringify(MEDICINES)),
     districtStore: JSON.parse(JSON.stringify(INITIAL_DISTRICT_STORE)),
-    procurementOrders: JSON.parse(JSON.stringify(INITIAL_PROCUREMENT_ORDERS))
+    procurementOrders: JSON.parse(JSON.stringify(INITIAL_PROCUREMENT_ORDERS)),
+    ignoredWarningsCount: {},
+    systemNotifications: []
   };
+  checkAndAutoProcure(); // run initial check to catch any default low stocks instantly
   res.json({ message: "Database reset to initial demo seeds successfully", db });
 });
 
 // API Route: Get State
 app.get("/api/state", (req, res) => {
+  checkAndAutoProcure();
   res.json(db);
+});
+
+// API Route: Dismiss Notification
+app.post("/api/admin/dismiss-notification", (req, res) => {
+  const { notifId } = req.body;
+  if (db.systemNotifications) {
+    db.systemNotifications = db.systemNotifications.filter(n => n.id !== notifId);
+  }
+  res.json({ success: true, db });
 });
 
 // API Route: Replenish Critical Drug from District Store (Strict rules: No transfer between PHC/CHC)
@@ -1259,6 +1460,8 @@ app.post("/api/doctor/prescribe", (req, res) => {
 
   patient.status = "OPD_Treated";
 
+  checkAndAutoProcure();
+
   res.json({
     success: true,
     patient,
@@ -1269,7 +1472,7 @@ app.post("/api/doctor/prescribe", (req, res) => {
 
 // API Route: Mark Patient as Seen (OPD_Treated)
 app.post("/api/doctor/mark-seen", (req, res) => {
-  const { patientId } = req.body;
+  const { patientId, diagnosis, complaints } = req.body;
 
   if (!patientId) {
     return res.status(400).json({ error: "Missing patientId." });
@@ -1281,11 +1484,44 @@ app.post("/api/doctor/mark-seen", (req, res) => {
   }
 
   patient.status = "OPD_Treated";
+  if (diagnosis !== undefined) {
+    patient.diagnosis = diagnosis;
+  }
+  if (complaints !== undefined) {
+    patient.complaints = complaints;
+  }
 
   res.json({
     success: true,
     patient,
-    message: "Patient successfully marked as seen and treated."
+    message: "Patient successfully marked as seen and treated with updated clinical notes."
+  });
+});
+
+// API Route: Save Patient Clinical Notes (Diagnosis & Complaints) without marking seen
+app.post("/api/doctor/save-notes", (req, res) => {
+  const { patientId, diagnosis, complaints } = req.body;
+
+  if (!patientId) {
+    return res.status(400).json({ error: "Missing patientId." });
+  }
+
+  const patient = db.patients.find(p => p.id === patientId);
+  if (!patient) {
+    return res.status(404).json({ error: "Patient not found." });
+  }
+
+  if (diagnosis !== undefined) {
+    patient.diagnosis = diagnosis;
+  }
+  if (complaints !== undefined) {
+    patient.complaints = complaints;
+  }
+
+  res.json({
+    success: true,
+    patient,
+    message: "Clinical notes updated successfully."
   });
 });
 
@@ -1587,19 +1823,19 @@ app.post("/api/admin/forecast", async (req, res) => {
   // High-quality hardcoded fallback forecasts aligned with seed state
   const mockForecast = {
     success: true,
-    districtHealthIndex: 72,
+    districtHealthIndex: 78,
     warnings: [
-      { facilityId: "fac-4", facilityName: "South PHC (Primary Health Centre)", medId: "med-1", medicineName: "Paracetamol 500mg", qtyLeft: 80, status: "Critical", daysLeft: 2 },
-      { facilityId: "fac-2", facilityName: "North PHC (Primary Health Centre)", medId: "med-7", medicineName: "Azithromycin 500mg", qtyLeft: 10, status: "Critical", daysLeft: 4 },
-      { facilityId: "fac-4", facilityName: "South PHC (Primary Health Centre)", medId: "med-8", medicineName: "Salbutamol Inhaler", qtyLeft: 3, status: "Critical", daysLeft: 3 }
+      { facilityId: "fac-4", facilityName: "Kedgaon PHC (Primary Health Centre)", medId: "med-1", medicineName: "Paracetamol 500mg", qtyLeft: 80, status: "Critical", daysLeft: 2 },
+      { facilityId: "fac-2", facilityName: "Yawat PHC (Primary Health Centre)", medId: "med-7", medicineName: "Azithromycin 500mg", qtyLeft: 10, status: "Critical", daysLeft: 4 },
+      { facilityId: "fac-4", facilityName: "Kedgaon PHC (Primary Health Centre)", medId: "med-8", medicineName: "Salbutamol Inhaler", qtyLeft: 3, status: "Critical", daysLeft: 3 }
     ],
     redistributions: [
-      { sourceFacilityId: "fac-1", sourceName: "Central CHC", targetFacilityId: "fac-4", targetName: "South PHC (Primary Health Centre)", medId: "med-1", medicineName: "Paracetamol 500mg", transferQty: 250, rationale: "Transfer 250 units of Paracetamol from Central CHC (650 in stock) to South PHC (only 80 units left) to resolve impending stock-out (Distance: 25km)." },
-      { sourceFacilityId: "fac-1", sourceName: "Central CHC", targetFacilityId: "fac-2", targetName: "North PHC (Primary Health Centre)", medId: "med-2", medicineName: "Amoxicillin 250mg", transferQty: 150, rationale: "Redistribute 150 units of Amoxicillin to North PHC to support recent respiratory/cough OPD surge (Distance: 12km)." }
+      { sourceFacilityId: "fac-1", sourceName: "Saswad SDH", targetFacilityId: "fac-4", targetName: "Kedgaon PHC (Primary Health Centre)", medId: "med-1", medicineName: "Paracetamol 500mg", transferQty: 250, rationale: "Transfer 250 units of Paracetamol from Saswad SDH (650 in stock) to Kedgaon PHC (only 80 units left) to resolve impending stock-out (Distance: 25km)." },
+      { sourceFacilityId: "fac-1", sourceName: "Saswad SDH", targetFacilityId: "fac-2", targetName: "Yawat PHC (Primary Health Centre)", medId: "med-2", medicineName: "Amoxicillin 250mg", transferQty: 150, rationale: "Redistribute 150 units of Amoxicillin to Yawat PHC to support recent respiratory/cough OPD surge (Distance: 12km)." }
     ],
     flags: [
-      { facilityId: "fac-4", facilityName: "South PHC (Primary Health Centre)", type: "Bed Shortage", severity: "High", reason: "General Ward and Pediatric Ward beds are at 100% capacity due to high localized patient footfall." },
-      { facilityId: "fac-3", facilityName: "East PHC (Primary Health Centre)", type: "Staffing Shortage", severity: "Medium", reason: "Dr. Meera Deshmukh is currently absent without WiFi attendance verification." }
+      { facilityId: "fac-4", facilityName: "Kedgaon PHC (Primary Health Centre)", type: "Bed Shortage", severity: "High", reason: "General Ward and Pediatric Ward beds are at 100% capacity due to high localized patient footfall." },
+      { facilityId: "fac-3", facilityName: "Wagholi PHC (Primary Health Centre)", type: "Staffing Shortage", severity: "Medium", reason: "Dr. Meera Deshmukh is currently absent without WiFi attendance verification." }
     ],
     forecasts: [
       { medicineName: "Paracetamol 500mg", trend: "Increasing", pctIncrease: 25, reason: "Surge in viral fever and Dengue cases across North & South zones." },

@@ -39,7 +39,8 @@ interface DoctorDashboardProps {
     targetDepartment: string;
     reason: string;
   }) => Promise<any>;
-  onMarkSeen: (patientId: string) => Promise<any>;
+  onMarkSeen: (patientId: string, diagnosis?: string, complaints?: string) => Promise<any>;
+  onSaveNotes?: (patientId: string, diagnosis: string, complaints: string) => Promise<any>;
   activeDoctorId?: string;
 }
 
@@ -54,6 +55,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   onPrescribe,
   onRefer,
   onMarkSeen,
+  onSaveNotes,
   activeDoctorId
 }) => {
   const t = TRANSLATIONS[language];
@@ -101,6 +103,12 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
   
   const [prescriptionSuccess, setPrescriptionSuccess] = useState<string | null>(null);
   const [referralError, setReferralError] = useState<string | null>(null);
+
+  // Doctor Clinical Notes state
+  const [clinicalDiagnosis, setClinicalDiagnosis] = useState("");
+  const [clinicalComplaints, setClinicalComplaints] = useState("");
+  const [savingNotes, setSavingNotes] = useState(false);
+  const [notesSuccess, setNotesSuccess] = useState<string | null>(null);
 
   // Diagnostic Recommendation and Ambulance Dispatch States
   const [diagnosticRecs, setDiagnosticRecs] = useState<any[]>([]);
@@ -362,6 +370,11 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
 
       const prevMeds = activePatient.prescribedMeds.map(m => m.name).join(", ");
       setPatientHistory(prevMeds || "None registered");
+      
+      // Prefill diagnosis and complaints
+      setClinicalDiagnosis(activePatient.diagnosis || "");
+      setClinicalComplaints(activePatient.complaints || activePatient.symptoms || "");
+      setNotesSuccess(null);
 
       // Auto-fetch clinical diagnostics recommendations
       const fetchDiagnosticRecommendations = async () => {
@@ -972,7 +985,7 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                       onClick={async () => {
                         setMarkingSeen(true);
                         try {
-                          await onMarkSeen(activePatient.id);
+                          await onMarkSeen(activePatient.id, clinicalDiagnosis, clinicalComplaints);
                         } catch (err) {
                           console.error(err);
                         } finally {
@@ -1029,6 +1042,81 @@ export const DoctorDashboard: React.FC<DoctorDashboardProps> = ({
                       </div>
                     </div>
                   </div>
+                </div>
+
+                {/* CLINICAL DOCUMENTATION & CASE NOTES: Diagnosis and Complaints */}
+                <div className="border-t border-slate-100 pt-5 mt-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-extrabold text-slate-800 text-xs uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                      ✍️ Clinical Documentation (Case Notes)
+                    </h4>
+                    {activePatient.status === "OPD_Treated" && (
+                      <span className="bg-emerald-100 text-emerald-800 border border-emerald-200 text-[10px] font-black px-2 py-0.5 rounded-md uppercase tracking-wide">
+                        Archived Case
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-sans">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">
+                        Chief Complaints
+                      </label>
+                      <textarea
+                        value={clinicalComplaints}
+                        onChange={(e) => setClinicalComplaints(e.target.value)}
+                        placeholder="Write complaints, onset, duration, severity, etc..."
+                        rows={3}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-400 focus:bg-white rounded-xl p-3.5 text-xs text-slate-800 outline-none transition-all resize-none font-sans"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-500 uppercase tracking-wide">
+                        Diagnosis & Findings
+                      </label>
+                      <textarea
+                        value={clinicalDiagnosis}
+                        onChange={(e) => setClinicalDiagnosis(e.target.value)}
+                        placeholder="Write clinical diagnosis, active status, differential findings, etc..."
+                        rows={3}
+                        className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-400 focus:bg-white rounded-xl p-3.5 text-xs text-slate-800 outline-none transition-all resize-none font-sans"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 flex-wrap pt-1 font-sans">
+                    <p className="text-[11px] text-slate-400">
+                      Saving notes updates the medical history database. Marking seen also auto-saves these notes.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={savingNotes}
+                      onClick={async () => {
+                        if (!onSaveNotes) return;
+                        setSavingNotes(true);
+                        setNotesSuccess(null);
+                        try {
+                          await onSaveNotes(activePatient.id, clinicalDiagnosis, clinicalComplaints);
+                          setNotesSuccess("Clinical documentation updated successfully!");
+                          setTimeout(() => setNotesSuccess(null), 5000);
+                        } catch (err) {
+                          console.error("Failed to save clinical notes:", err);
+                        } finally {
+                          setSavingNotes(false);
+                        }
+                      }}
+                      className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-black text-xs px-5 py-2.5 rounded-xl transition cursor-pointer shadow-sm shrink-0 uppercase tracking-wider"
+                    >
+                      {savingNotes ? "Saving Records..." : "Save Clinical Notes"}
+                    </button>
+                  </div>
+
+                  {notesSuccess && (
+                    <div className="bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-xl p-3 animate-fadeIn text-xs font-medium flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
+                      <span>{notesSuccess}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3">

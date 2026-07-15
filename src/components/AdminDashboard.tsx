@@ -30,6 +30,7 @@ import { TRANSLATIONS, DistrictAnalytics, Facility, Medicine, Patient, Doctor, A
 import { SymptomHeatmap } from "./SymptomHeatmap";
 import { TrendAnalysis } from "./TrendAnalysis";
 import { ThresholdSettings } from "./ThresholdSettings";
+import { OfficialPublicHealthIndicators } from "./OfficialPublicHealthIndicators";
 
 interface AdminDashboardProps {
   facilities: Facility[];
@@ -65,6 +66,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [localFacilities, setLocalFacilities] = useState<Facility[]>(facilities);
   const [localProcurements, setLocalProcurements] = useState<any[]>([]);
   const [localDistrictStore, setLocalDistrictStore] = useState<Record<string, number>>({});
+  const [localNotifications, setLocalNotifications] = useState<any[]>([]);
   const [replenishingId, setReplenishingId] = useState<string | null>(null);
 
   // Lab parameters inline editing state
@@ -115,6 +117,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const handleApplyCalibration = (medId: string, value: number) => {
+    const updated = { ...customThresholds, [medId]: value };
+    handleUpdateThresholds(updated);
+  };
+
   const refreshLocalState = async () => {
     try {
       const res = await fetch("/api/state");
@@ -123,6 +130,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setLocalFacilities(data.facilities || facilities);
         setLocalProcurements(data.procurementOrders || []);
         setLocalDistrictStore(data.districtStore || {});
+        setLocalNotifications(data.systemNotifications || []);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDismissNotification = async (notifId: string) => {
+    try {
+      const res = await fetch("/api/admin/dismiss-notification", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notifId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLocalNotifications(data.db.systemNotifications || []);
+        // Trigger local state reload to catch newly updated orders/stocks
+        await refreshLocalState();
       }
     } catch (err) {
       console.error(err);
@@ -723,6 +749,85 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       </div>
 
+      {/* AI EMERGENCY ACTION CENTER: Automated Procurement Alerts for District Admin */}
+      {localNotifications.length > 0 && (
+        <div 
+          className="bg-rose-50 border-2 border-rose-200 rounded-2xl p-5 shadow-sm space-y-4 font-sans animate-fade-in"
+          id="ai-emergency-action-center"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-rose-200 pb-3">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-3 w-3 relative">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+              </span>
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="h-5 w-5 text-rose-600 shrink-0" />
+                <h3 className="text-sm font-black text-rose-950 uppercase tracking-wide">
+                  AI Emergency Override Center — District Alerts
+                </h3>
+              </div>
+            </div>
+            <span className="bg-rose-100 text-rose-800 text-[10px] font-bold px-2.5 py-1 rounded-md border border-rose-200 font-mono">
+              Action Required: {localNotifications.length} Pending Overrides
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            {localNotifications.map((notif) => (
+              <div 
+                key={notif.id} 
+                className="bg-white border border-rose-150 rounded-xl p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:border-rose-300 transition shadow-xs"
+              >
+                <div className="space-y-1.5 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="bg-rose-600 text-white font-mono font-bold text-[9px] px-2 py-0.5 rounded-full uppercase">
+                      Automated Procurement
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-800 font-medium leading-relaxed">
+                    {notif.message}
+                  </p>
+                  <div className="flex items-center gap-4 text-[11px] text-slate-500 font-medium bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100 inline-flex flex-wrap">
+                    <div>
+                      Facility: <span className="text-slate-800 font-bold">{notif.facilityName}</span>
+                    </div>
+                    <div className="h-3 w-px bg-slate-200"></div>
+                    <div>
+                      Supply: <span className="text-rose-700 font-bold">{notif.medicineName}</span>
+                    </div>
+                    <div className="h-3 w-px bg-slate-200"></div>
+                    <div>
+                      Critical Stock: <span className="text-rose-700 font-black font-mono">{notif.stock} / {notif.threshold} (Threshold)</span>
+                    </div>
+                    {notif.orderId && (
+                      <>
+                        <div className="h-3 w-px bg-slate-200"></div>
+                        <div>
+                          Emergency Order ID: <span className="text-indigo-600 font-bold font-mono">{notif.orderId}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+                  <button
+                    onClick={() => handleDismissNotification(notif.id)}
+                    className="bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-sans font-bold text-xs px-3.5 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 shadow-sm shadow-rose-600/10"
+                  >
+                    Acknowledge & Clear Alert
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* SECTION 2: LIVE DISTRICT BED OCCUPANCY & CAPACITY COMMAND CENTER */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 font-sans">
         
@@ -1019,6 +1124,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
+      {/* OFFICIAL CENSUS & NFHS-5 PUBLIC INDICATORS BASELINE REFERENCE */}
+      <OfficialPublicHealthIndicators 
+        language={language}
+        onApplyThresholdCalibration={handleApplyCalibration}
+      />
+
       {/* SYMPTOM SURVEILLANCE & OUTBREAK SURVEILLANCE HEATMAP */}
       <SymptomHeatmap 
         facilities={facilities}
@@ -1311,7 +1422,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 const isAnyLoading = actioningId !== null;
 
                 return (
-                  <div key={idx} className="bg-white border border-slate-150 p-4 rounded-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:shadow-xs transition">
+                  <div key={`${alert.facilityId}-${alert.medicineId}-${alert.isCritical ? "critical" : "general"}`} className="bg-white border border-slate-150 p-4 rounded-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:shadow-xs transition">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className="font-extrabold text-xs text-slate-800">
@@ -1457,10 +1568,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               const med = medicines[order.medicineId];
 
               return (
-                <div key={order.orderId} className="bg-slate-50 border border-slate-150 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
+                <div key={order.id} className="bg-slate-50 border border-slate-150 p-4 rounded-xl flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs">
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-800">📦 Order: {order.orderId}</span>
+                      <span className="font-bold text-slate-800">📦 Order: {order.id}</span>
                       <span className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded ${
                         order.priority === "CRITICAL"
                           ? "bg-rose-100 text-rose-800"
@@ -1482,14 +1593,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <>
                         <button
                           type="button"
-                          onClick={() => handleUpdateProcurement(order.orderId, "Dispatched")}
+                          onClick={() => handleUpdateProcurement(order.id, "Dispatched")}
                           className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg uppercase cursor-pointer"
                         >
                           Dispatch from Store
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleUpdateProcurement(order.orderId, "Dispatched")}
+                          onClick={() => handleUpdateProcurement(order.id, "Dispatched")}
                           className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg uppercase cursor-pointer"
                         >
                           Purchase Directly
@@ -1500,7 +1611,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     {order.status === "Dispatched" && (
                       <button
                         type="button"
-                        onClick={() => handleUpdateProcurement(order.orderId, "Delivered")}
+                        onClick={() => handleUpdateProcurement(order.id, "Delivered")}
                         className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg uppercase cursor-pointer"
                       >
                         Fulfill Delivery
