@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { motion } from "motion/react";
-import { HeartPulse, ShieldAlert, KeyRound, User, Stethoscope, ShieldCheck, Globe, Fingerprint, ScanFace } from "lucide-react";
+import { HeartPulse, ShieldAlert, KeyRound, User, Stethoscope, ShieldCheck, Globe, Fingerprint, ScanFace, Phone, Send, IdCard, Lock, CheckCircle } from "lucide-react";
 import { TRANSLATIONS, Doctor } from "../types";
 
 interface LoginPortalProps {
@@ -9,7 +9,7 @@ interface LoginPortalProps {
   setLanguage: (lang: "en" | "hi" | "mr") => void;
   onLoginSuccess: (
     session:
-      | { role: "patient" }
+      | { role: "patient"; phone?: string; abhaId?: string }
       | { role: "doctor"; doctorId: string }
       | { role: "admin" }
   ) => void;
@@ -38,6 +38,115 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   // Admin credentials form state
   const [adminPin, setAdminPin] = useState("");
   const [adminError, setAdminError] = useState("");
+
+  // Patient credentials state
+  const [patientAuthMethod, setPatientAuthMethod] = useState<"mobile" | "abha">("mobile");
+  const [patientPhone, setPatientPhone] = useState("");
+  const [patientOtp, setPatientOtp] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpError, setOtpError] = useState("");
+  const [abhaId, setAbhaId] = useState("");
+  const [abhaPin, setAbhaPin] = useState("");
+  const [abhaError, setAbhaError] = useState("");
+  const [abhaValidating, setAbhaValidating] = useState(false);
+
+  const handleSendOtp = () => {
+    setOtpError("");
+    if (patientPhone.length !== 10) {
+      setOtpError(
+        language === "hi"
+          ? "कृपया 10 अंकों का वैध मोबाइल नंबर दर्ज करें।"
+          : language === "mr"
+          ? "कृपया १० अंकी वैध मोबाईल नंबर प्रविष्ट करा."
+          : "Please enter a valid 10-digit mobile number."
+      );
+      return;
+    }
+
+    setOtpSending(true);
+    setTimeout(() => {
+      setOtpSending(false);
+      setOtpSent(true);
+      try {
+        const text = "Your Demo O T P is 1 2 3 4 5 6";
+        const speechMsg = new SpeechSynthesisUtterance(text);
+        speechMsg.rate = 1.0;
+        window.speechSynthesis.speak(speechMsg);
+      } catch (e) {}
+    }, 1200);
+  };
+
+  const handlePatientMobileLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setOtpError("");
+
+    if (patientOtp === "123456" || patientOtp === "1234") {
+      onLoginSuccess({ role: "patient", phone: patientPhone });
+    } else {
+      setOtpError(
+        language === "hi"
+          ? "गलत ओटीपी! डेमो सत्यापन के लिए '123456' या '1234' दर्ज करें।"
+          : language === "mr"
+          ? "चुकीचा ओटीपी! डेमो पडताळणीसाठी '123456' किंवा '1234' प्रविष्ट करा."
+          : "Invalid OTP! Enter '123456' or '1234' for demo verification."
+      );
+    }
+  };
+
+  const handlePatientAbhaLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAbhaError("");
+
+    if (!abhaId.trim()) {
+      setAbhaError(
+        language === "hi"
+          ? "कृपया अपना आभा आईडी दर्ज करें।"
+          : language === "mr"
+          ? "कृपया आपला आभा आयडी प्रविष्ट करा."
+          : "Please enter your ABHA ID."
+      );
+      return;
+    }
+
+    if (abhaPin === "1234") {
+      setAbhaValidating(true);
+      setTimeout(() => {
+        setAbhaValidating(false);
+        onLoginSuccess({ role: "patient", abhaId: abhaId });
+      }, 1500);
+    } else {
+      setAbhaError(
+        language === "hi"
+          ? "गलत पिन! कृपया '1234' दर्ज करें।"
+          : language === "mr"
+          ? "चुकीचा पिन! कृपया '1234' प्रविष्ट करा."
+          : "Invalid PIN! Please enter '1234' for demo validation."
+      );
+    }
+  };
+
+  const formatAbhaId = (value: string) => {
+    const clean = value.replace(/[^0-9]/g, "");
+    if (clean.length === 0) return value;
+    let formatted = "";
+    for (let i = 0; i < clean.length && i < 14; i++) {
+      if (i === 2 || i === 6 || i === 10) {
+        formatted += "-";
+      }
+      formatted += clean[i];
+    }
+    return formatted;
+  };
+
+  const handleAbhaChange = (val: string) => {
+    const hasLetters = /[a-zA-Z@]/.test(val);
+    if (hasLetters) {
+      setAbhaId(val);
+    } else {
+      setAbhaId(formatAbhaId(val));
+    }
+  };
 
   // Biometric shift login placeholder simulation state
   const [biometricRole, setBiometricRole] = useState<"doctor" | "admin" | null>(null);
@@ -131,42 +240,81 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
   const localTranslation: Record<string, Record<string, string>> = {
     en: {
       selectRoleText: "Who is accessing the system today?",
-      patientCardDesc: "Direct diagnostic routing & OPD ticketing console. No clinical credential required for public patients.",
+      patientCardDesc: "Secure access to OPD queue, diagnostic records, and referral forecasts. Enter your mobile number or connect via ABHA ID.",
       doctorCardDesc: "WiFi-secured morning/evening clinic attendance logging, real-time prescription dispense, and patient referral.",
       adminCardDesc: "District healthcare indexes, automated pharmaceutical redistribution plans, and 30-day forecast models.",
-      enterPatient: "Open Patient Dashboard (No Login Required)",
+      enterPatient: "Open Patient Dashboard",
       enterDoctor: "Verify & Launch Doctor Console",
       enterAdmin: "Verify & Open District Console",
       selectDocProfile: "Select On-Duty Doctor Profile",
       enterPasscode: "Enter Secure Passcode",
       demoPasscodeLabel: "Demo Passcode",
-      wrongPasscode: "Invalid passcode. Please try again."
+      wrongPasscode: "Invalid passcode. Please try again.",
+      loginViaMobile: "Mobile + OTP Login",
+      loginViaAbha: "ABHA ID Login",
+      mobilePlaceholder: "Enter 10-digit mobile number",
+      sendOtp: "Send 6-Digit OTP",
+      sendingOtp: "Sending OTP...",
+      otpPlaceholder: "Enter 6-digit OTP",
+      verifyOtp: "Verify OTP & Enter",
+      demoOtpLabel: "Demo OTP",
+      abhaPlaceholder: "14-digit ABHA No. (XX-XXXX-XXXX-XXXX)",
+      abhaPinLabel: "Enter 4-Digit ABHA PIN",
+      connectAbha: "Secure ABHA Login",
+      demoAbhaLabel: "Demo PIN",
+      validating: "Validating Security Credentials..."
     },
     hi: {
       selectRoleText: "आज सिस्टम का उपयोग कौन कर रहा है?",
-      patientCardDesc: "मरीजों के लिए तत्काल ओपीडी टिकट बुकिंग और नैदानिक परीक्षण रिपोर्ट देखने के लिए। कोई लॉगिन आवश्यक नहीं है।",
+      patientCardDesc: "ओपीडी कतार, नैदानिक रिकॉर्ड और रेफरल पूर्वानुमानों तक सुरक्षित पहुंच। अपना मोबाइल नंबर दर्ज करें या आभा (ABHA) आईडी से जुड़ें।",
       doctorCardDesc: "वाईफाई-सत्यापित उपस्थिति प्रणाली, मरीजों का नुस्खा विवरण, और अस्पतालों के बीच आपातकालीन रेफ़रल प्रबंधन।",
       adminCardDesc: "जिला स्तर की आपूर्ति श्रृंखला पूर्वानुमान, गंभीर औषधि कमी चेतावनी, और स्वास्थ्य सूचकांक विश्लेषण।",
-      enterPatient: "मरीज डैशबोर्ड खोलें (कोई लॉगिन आवश्यक नहीं)",
+      enterPatient: "मरीज डैशबोर्ड खोलें",
       enterDoctor: "सत्यापित करें और डॉक्टर कंसोल खोलें",
       enterAdmin: "सत्यापित करें और जिला कंसोल खोलें",
       selectDocProfile: "ऑन-ड्यूटी डॉक्टर प्रोफ़ाइल चुनें",
       enterPasscode: "सुरक्षित पासकोड दर्ज करें",
       demoPasscodeLabel: "डेमो पासकोड",
-      wrongPasscode: "गलत पासकोड। कृपया पुनः प्रयास करें।"
+      wrongPasscode: "गलत पासकोड। कृपया पुनः प्रयास करें।",
+      loginViaMobile: "मोबाइल + ओटीपी लॉगिन",
+      loginViaAbha: "आभा (ABHA) आईडी लॉगिन",
+      mobilePlaceholder: "10-अंकीय मोबाइल नंबर दर्ज करें",
+      sendOtp: "6-अंकीय ओटीपी भेजें",
+      sendingOtp: "ओटीपी भेजा जा रहा है...",
+      otpPlaceholder: "6-अंकीय ओटीपी दर्ज करें",
+      verifyOtp: "ओटीपी सत्यापित करें और आगे बढ़ें",
+      demoOtpLabel: "डेमो ओटीपी",
+      abhaPlaceholder: "14-अंकीय आभा संख्या (XX-XXXX-XXXX-XXXX)",
+      abhaPinLabel: "4-अंकीय आभा पिन दर्ज करें",
+      connectAbha: "सुरक्षित आभा लॉगिन",
+      demoAbhaLabel: "डेमो पिन",
+      validating: "सुरक्षा क्रेडेंशियल सत्यापित हो रहे हैं..."
     },
     mr: {
       selectRoleText: "आज सिस्टम कोण वापरत आहे?",
-      patientCardDesc: "रुग्णांसाठी तात्काळ ओपीडी तिकीट बुकिंग आणि वैद्यकीय अहवाल पाहण्यासाठी. लॉगिन आवश्यक नाही.",
+      patientCardDesc: "ओपीडी रांग, वैद्यकीय नोंदी आणि रेफरल अंदाजांमध्ये सुरक्षित प्रवेश. तुमचा मोबाईल नंबर प्रविष्ट करा किंवा आभा (ABHA) आयडी द्वारे कनेक्ट करा.",
       doctorCardDesc: "वायफाय-सत्यापित उपस्थिती नोंदवणे, औषधोपचार लिहून देणे, आणि रुग्णालयांच्या दरम्यान रेफ़रल व्यवस्थापन करणे.",
       adminCardDesc: "जिल्हास्तरीय औषध पुरवठा साखळी अंदाज, साठा टंचाई इशारा आणि आरोग्य निर्देशांक विश्लेषण.",
-      enterPatient: "रुग्ण डॅशबोर्ड उघडा (लॉगिन आवश्यक नाही)",
+      enterPatient: "रुग्ण डॅशबोर्ड उघडा",
       enterDoctor: "सत्यापित करा आणि डॉक्टर कन्सोल उघडा",
       enterAdmin: "सत्यापित करा आणि जिल्हा कन्सोल उघडा",
       selectDocProfile: "ऑन-ड्यूटी डॉक्टर प्रोफाइल निवडा",
       enterPasscode: "सुरक्षित पासकोड प्रविष्ट करा",
       demoPasscodeLabel: "डेमो पासकोड",
-      wrongPasscode: "चुकीचा पासकोड. कृपया पुन्हा प्रयत्न करा."
+      wrongPasscode: "चुकीचा पासकोड. कृपया पुन्हा प्रयत्न करा.",
+      loginViaMobile: "मोबाईल + ओटीपी लॉगिन",
+      loginViaAbha: "आभा (ABHA) आयडी लॉगिन",
+      mobilePlaceholder: "10-अंकी मोबाईल नंबर प्रविष्ट करा",
+      sendOtp: "6-अंकी ओटीपी पाठवा",
+      sendingOtp: "ओटीपी पाठवला जात आहे...",
+      otpPlaceholder: "6-अंकी ओटीपी प्रविष्ट करा",
+      verifyOtp: "ओटीपी सत्यापित करा आणि पुढे जा",
+      demoOtpLabel: "डेमो ओटीपी",
+      abhaPlaceholder: "14-अंकी आभा क्रमांक (XX-XXXX-XXXX-XXXX)",
+      abhaPinLabel: "4-अंकी आभा पिन प्रविष्ट करा",
+      connectAbha: "सुरक्षित आभा लॉगिन",
+      demoAbhaLabel: "डेमो पिन",
+      validating: "सुरक्षा क्रेडेन्शियल सत्यापित केले जात आहेत..."
     }
   };
 
@@ -355,9 +503,9 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="space-y-6 text-center"
+                  className="space-y-6 text-left max-w-md mx-auto"
                 >
-                  <div className="max-w-md mx-auto space-y-3">
+                  <div className="text-center space-y-2 mb-4">
                     <h3 className="text-xl font-bold text-slate-800 font-sans">
                       {t.patientRole}
                     </h3>
@@ -366,15 +514,253 @@ export const LoginPortal: React.FC<LoginPortalProps> = ({
                     </p>
                   </div>
 
-                  <div className="py-2">
+                  {/* Sub-tabs for Patient Authentication Method */}
+                  <div className="flex bg-slate-100 p-1 rounded-xl mb-4 gap-1 border border-slate-200">
                     <button
-                      id="patient-portal-launch-btn"
-                      onClick={handlePatientEntry}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-4 px-8 rounded-2xl text-sm transition shadow-lg shadow-indigo-600/25 cursor-pointer max-w-md w-full inline-block"
+                      type="button"
+                      onClick={() => {
+                        setPatientAuthMethod("mobile");
+                        setOtpError("");
+                      }}
+                      className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        patientAuthMethod === "mobile"
+                          ? "bg-white text-indigo-600 shadow-xs border border-slate-200/50"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
                     >
-                      {lt.enterPatient}
+                      <Phone className="h-3.5 w-3.5" />
+                      <span>{lt.loginViaMobile}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPatientAuthMethod("abha");
+                        setAbhaError("");
+                      }}
+                      className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        patientAuthMethod === "abha"
+                          ? "bg-white text-indigo-600 shadow-xs border border-slate-200/50"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      <IdCard className="h-3.5 w-3.5" />
+                      <span>{lt.loginViaAbha}</span>
                     </button>
                   </div>
+
+                  {/* MOBILE AUTHENTICATION METHOD */}
+                  {patientAuthMethod === "mobile" && (
+                    <motion.div
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="space-y-4"
+                    >
+                      {!otpSent ? (
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                              {language === "hi" ? "अपना मोबाइल नंबर" : language === "mr" ? "तुमचा मोबाईल नंबर" : "Your Mobile Number"}
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-3.5 top-2.5 text-slate-400 text-sm font-bold border-r border-slate-200 pr-2 pt-0.5">
+                                +91
+                              </span>
+                              <input
+                                id="patient-phone-input"
+                                type="tel"
+                                required
+                                value={patientPhone}
+                                onChange={(e) => {
+                                  const clean = e.target.value.replace(/[^0-9]/g, "").slice(0, 10);
+                                  setPatientPhone(clean);
+                                }}
+                                placeholder={lt.mobilePlaceholder}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-16 pr-4 py-2.5 text-sm font-semibold tracking-wide outline-none focus:border-indigo-500 focus:bg-white transition"
+                              />
+                            </div>
+                          </div>
+
+                          {otpError && (
+                            <div className="p-3 bg-red-50 border border-red-150 text-red-600 rounded-xl text-xs flex items-start gap-2 font-medium">
+                              <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
+                              <span>{otpError}</span>
+                            </div>
+                          )}
+
+                          <button
+                            id="patient-send-otp-btn"
+                            type="button"
+                            onClick={handleSendOtp}
+                            disabled={otpSending}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold py-3.5 px-4 rounded-xl text-xs transition shadow-md shadow-indigo-600/10 cursor-pointer flex items-center justify-center gap-2"
+                          >
+                            {otpSending ? (
+                              <>
+                                <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                <span>{lt.sendingOtp}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Send className="h-3.5 w-3.5" />
+                                <span>{lt.sendOtp}</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      ) : (
+                        <form onSubmit={handlePatientMobileLogin} className="space-y-4">
+                          <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 text-xs text-emerald-800 flex items-start gap-2">
+                            <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                            <div>
+                              <p className="font-bold">{language === "hi" ? "ओटीपी भेजा गया!" : language === "mr" ? "ओटीपी पाठवला!" : "OTP Sent Successfully!"}</p>
+                              <p className="mt-0.5 text-[11px] opacity-90">
+                                {language === "hi" 
+                                  ? `हमने +91 ${patientPhone.slice(0,6)}**** पर कूटशब्द भेजा है।` 
+                                  : language === "mr" 
+                                  ? `आम्ही +91 ${patientPhone.slice(0,6)}**** वर कोड पाठवला आहे.` 
+                                  : `We sent a temporary passcode to +91 ${patientPhone.slice(0,6)}****.`}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                              {language === "hi" ? "एकमुश्त पासवर्ड दर्ज करें" : language === "mr" ? "ओटीपी प्रविष्ट करा" : "Enter Verification Code"}
+                            </label>
+                            <div className="relative">
+                              <input
+                                id="patient-otp-input"
+                                type="text"
+                                required
+                                value={patientOtp}
+                                onChange={(e) => {
+                                  const clean = e.target.value.replace(/[^0-9]/g, "").slice(0, 6);
+                                  setPatientOtp(clean);
+                                }}
+                                placeholder={lt.otpPlaceholder}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-mono tracking-widest outline-none focus:border-indigo-500 focus:bg-white transition"
+                              />
+                              <Lock className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                            </div>
+                          </div>
+
+                          {otpError && (
+                            <div className="p-3 bg-red-50 border border-red-150 text-red-600 rounded-xl text-xs flex items-start gap-2 font-medium">
+                              <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
+                              <span>{otpError}</span>
+                            </div>
+                          )}
+
+                          <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 text-[11px] text-indigo-700 font-medium">
+                            💡 {lt.demoOtpLabel}: <strong className="font-bold font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200/50">123456</strong>
+                          </div>
+
+                          <button
+                            id="patient-verify-otp-btn"
+                            type="submit"
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 px-4 rounded-xl text-xs transition shadow-md shadow-indigo-600/10 cursor-pointer flex items-center justify-center gap-2"
+                          >
+                            <span>{lt.verifyOtp}</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOtpSent(false);
+                              setPatientOtp("");
+                              setOtpError("");
+                            }}
+                            className="w-full text-center text-xs text-slate-400 hover:text-slate-600 font-bold transition py-1 cursor-pointer"
+                          >
+                            {language === "hi" ? "← मोबाइल नंबर बदलें" : language === "mr" ? "← मोबाईल नंबर बदला" : "← Change Mobile Number"}
+                          </button>
+                        </form>
+                      )}
+                    </motion.div>
+                  )}
+
+                  {/* ABHA ID AUTHENTICATION METHOD */}
+                  {patientAuthMethod === "abha" && (
+                    <motion.div
+                      initial={{ opacity: 0, x: 10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      className="space-y-4"
+                    >
+                      <form onSubmit={handlePatientAbhaLogin} className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                            {language === "hi" ? "आभा संख्या या आभा पता" : language === "mr" ? "आभा क्रमांक किंवा आभा पत्ता" : "ABHA Number or ABHA Address"}
+                          </label>
+                          <div className="relative">
+                            <input
+                              id="patient-abha-id-input"
+                              type="text"
+                              required
+                              value={abhaId}
+                              onChange={(e) => handleAbhaChange(e.target.value)}
+                              placeholder={lt.abhaPlaceholder}
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-semibold outline-none focus:border-indigo-500 focus:bg-white transition"
+                            />
+                            <IdCard className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">
+                            {lt.abhaPinLabel}
+                          </label>
+                          <div className="relative">
+                            <input
+                              id="patient-abha-pin-input"
+                              type="password"
+                              required
+                              value={abhaPin}
+                              onChange={(e) => setAbhaPin(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
+                              placeholder="••••"
+                              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-2.5 text-sm font-mono tracking-widest outline-none focus:border-indigo-500 focus:bg-white transition"
+                            />
+                            <Lock className="absolute left-3.5 top-3 h-4 w-4 text-slate-400" />
+                          </div>
+                        </div>
+
+                        {abhaError && (
+                          <div className="p-3 bg-red-50 border border-red-150 text-red-600 rounded-xl text-xs flex items-start gap-2 font-medium">
+                            <ShieldAlert className="h-4 w-4 shrink-0 mt-0.5" />
+                            <span>{abhaError}</span>
+                          </div>
+                        )}
+
+                        <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 text-[11px] text-indigo-700 font-medium">
+                          💡 {lt.demoAbhaLabel}: <strong className="font-bold font-mono bg-white px-1.5 py-0.5 rounded border border-indigo-200/50">1234</strong>
+                        </div>
+
+                        <button
+                          id="patient-abha-submit-btn"
+                          type="submit"
+                          disabled={abhaValidating}
+                          className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-bold py-3.5 px-4 rounded-xl text-xs transition shadow-md shadow-indigo-600/10 cursor-pointer flex items-center justify-center gap-2"
+                        >
+                          {abhaValidating ? (
+                            <>
+                              <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              <span>{lt.validating}</span>
+                            </>
+                          ) : (
+                            <>
+                              <ShieldCheck className="h-4 w-4" />
+                              <span>{lt.connectAbha}</span>
+                            </>
+                          )}
+                        </button>
+                      </form>
+                    </motion.div>
+                  )}
                 </motion.div>
               )}
 

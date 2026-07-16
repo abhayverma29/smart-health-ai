@@ -27,6 +27,8 @@ export default function App() {
   const [session, setSession] = useState<{
     role: "patient" | "doctor" | "admin";
     doctorId?: string;
+    phone?: string;
+    abhaId?: string;
   } | null>(null);
 
   // Derive role for downward compatibility
@@ -356,6 +358,8 @@ export default function App() {
                 language={language}
                 onBookOPD={handleBookOPD}
                 booking={booking}
+                patientPhone={session?.phone}
+                patientAbhaId={session?.abhaId}
               />
             )}
 

@@ -28,12 +28,38 @@ if (apiKey) {
   console.warn("GEMINI_API_KEY is not defined. AI features will fallback to deterministic rules.");
 }
 
+// In-memory cache for all AI-generated content to prevent "AI data refreshment" for 24 hours
+const aiCache = new Map<string, { value: string; timestamp: number }>();
+const CACHE_TTL_24H = 24 * 60 * 60 * 1000; // 24 hours
+
+// Circuit breaker to avoid slow API timeouts during presentation when quota is exhausted
+let isAiSuspendedUntil = 0;
+const SUSPENSION_DURATION = 15 * 60 * 1000; // 15 minutes
+
 // Helper to call Gemini with a fallback model if the primary is busy/rate-limited
 async function generateTextWithFallback(
-  aiInstance: GoogleGenAI,
+  aiInstance: GoogleGenAI | null,
   contents: string,
   responseMimeType?: string
 ): Promise<string> {
+  if (!aiInstance) {
+    throw new Error("Gemini client is not initialized.");
+  }
+
+  const cacheKey = contents.trim();
+  const cached = aiCache.get(cacheKey);
+  const now = Date.now();
+
+  if (cached && (now - cached.timestamp < CACHE_TTL_24H)) {
+    console.log("[Cache Hit] Serving cached AI content to preserve state for 24 hours.");
+    return cached.value;
+  }
+
+  if (now < isAiSuspendedUntil) {
+    console.warn(`[AI Circuit Breaker] Gemini calls are temporarily bypassed (Quota Limit/429 active) for the next ${Math.round((isAiSuspendedUntil - now) / 1000)}s. Directing to instant offline ruleset.`);
+    throw new Error("AI is temporarily suspended due to rate limiting. Directing to instant ruleset.");
+  }
+
   const models = [
     "gemini-3.5-flash",
     "gemini-3.1-flash-lite",
@@ -48,11 +74,21 @@ async function generateTextWithFallback(
         config: responseMimeType ? { responseMimeType } : undefined,
       });
       if (response && response.text) {
+        // Cache successful response to save API quota and preserve generated data for 24 hours
+        aiCache.set(cacheKey, { value: response.text, timestamp: now });
         return response.text;
       }
     } catch (err: any) {
       lastError = err;
       console.warn(`[Gemini Warn] Model ${model} generation failed: ${err?.message || err}`);
+      
+      const errStr = String(err?.message || err).toLowerCase();
+      if (errStr.includes("429") || errStr.includes("quota") || errStr.includes("resource_exhausted") || errStr.includes("rate limit")) {
+        // Suspend AI calls to prevent slow API timeouts during presentation
+        isAiSuspendedUntil = Date.now() + SUSPENSION_DURATION;
+        console.warn(`[AI Circuit Breaker Activated] Rate limit detected. Suspending Gemini calls for 15 minutes to guarantee instant offline fallback performance.`);
+        break; // Break early to avoid further API timeouts/lag
+      }
     }
   }
   throw lastError || new Error("All fallback models failed.");
@@ -238,7 +274,7 @@ const INITIAL_LAB_INVESTIGATIONS: Record<string, Record<string, LabInvestigation
     "dengue": { id: "dengue", name: "Dengue NS1 Antigen", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 80, pendingSamples: 24 },
     "malaria": { id: "malaria", name: "Malaria Smear", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 80, pendingSamples: 18 },
     "sugar": { id: "sugar", name: "Blood Sugar (HbA1c)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 150, pendingSamples: 25 },
-    "ultrasound": { id: "ultrasound", name: "Obstetric Ultrasound", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 20, pendingSamples: 5 }
+    "ultrasound": { id: "ultrasound", name: "Obstetric Ultrasound", status: "Reagents Out of Stock", machineStatus: "Operational", reagentAvailability: "Out of Stock", dailyCapacity: 20, pendingSamples: 5, expectedAvailabilityTime: "Reagents Pending" }
   },
   "fac-2": {
     "cbc": { id: "cbc", name: "Complete Blood Count (CBC)", status: "Limited Slots", machineStatus: "Operational", reagentAvailability: "Low", dailyCapacity: 15, pendingSamples: 12 },
@@ -246,14 +282,14 @@ const INITIAL_LAB_INVESTIGATIONS: Record<string, Record<string, LabInvestigation
     "kft": { id: "kft", name: "Kidney Function Test (KFT)", status: "Unavailable", machineStatus: "Down", reagentAvailability: "Low", dailyCapacity: 0, pendingSamples: 0, expectedAvailabilityTime: "In 2 Days" },
     "dengue": { id: "dengue", name: "Dengue NS1 Antigen", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 20, pendingSamples: 5 },
     "malaria": { id: "malaria", name: "Malaria Smear", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 25, pendingSamples: 4 },
-    "sugar": { id: "sugar", name: "Blood Sugar (HbA1c)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 40, pendingSamples: 8 },
+    "sugar": { id: "sugar", name: "Blood Sugar (HbA1c)", status: "Reagents Out of Stock", machineStatus: "Operational", reagentAvailability: "Out of Stock", dailyCapacity: 40, pendingSamples: 8, expectedAvailabilityTime: "Pending Delivery" },
     "ultrasound": { id: "ultrasound", name: "Obstetric Ultrasound", status: "Unavailable", machineStatus: "Down", reagentAvailability: "Out of Stock", dailyCapacity: 0, pendingSamples: 0, expectedAvailabilityTime: "Reagents Pending" }
   },
   "fac-3": {
     "cbc": { id: "cbc", name: "Complete Blood Count (CBC)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 20, pendingSamples: 5 },
     "lft": { id: "lft", name: "Liver Function Test (LFT)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 10, pendingSamples: 2 },
     "kft": { id: "kft", name: "Kidney Function Test (KFT)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 10, pendingSamples: 3 },
-    "dengue": { id: "dengue", name: "Dengue NS1 Antigen", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 20, pendingSamples: 6 },
+    "dengue": { id: "dengue", name: "Dengue NS1 Antigen", status: "Reagents Out of Stock", machineStatus: "Operational", reagentAvailability: "Out of Stock", dailyCapacity: 20, pendingSamples: 6, expectedAvailabilityTime: "In Transit" },
     "malaria": { id: "malaria", name: "Malaria Smear", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 20, pendingSamples: 4 },
     "sugar": { id: "sugar", name: "Blood Sugar (HbA1c)", status: "Available", machineStatus: "Operational", reagentAvailability: "Adequate", dailyCapacity: 50, pendingSamples: 10 },
     "ultrasound": { id: "ultrasound", name: "Obstetric Ultrasound", status: "Limited Slots", machineStatus: "Operational", reagentAvailability: "Low", dailyCapacity: 5, pendingSamples: 3 }
@@ -342,7 +378,107 @@ const INITIAL_DOCTORS: Doctor[] = [
   { id: "doc-6", name: "Dr. Robert D'Souza", specialty: "General Medicine", department: "General OPD", facilityId: "fac-4", wifiSsid: "South_PHC_Internal", attendance: { clockIn: "09:12 AM", clockOut: null, wifiVerified: true } }
 ];
 
-const INITIAL_PATIENTS: Patient[] = [
+// Programmatic Patient Generator to seed realistic data for the final demonstration:
+const generateMorePatients = (): Patient[] => {
+  const generated: Patient[] = [];
+  const FIRST_NAMES = ["Amit", "Rajesh", "Suresh", "Vijay", "Sunil", "Anil", "Deepak", "Sanjay", "Manoj", "Pankaj", "Vikas", "Rahul", "Priya", "Sunita", "Anita", "Kiran", "Meena", "Jyoti", "Asha", "Rekha", "Pooja", "Lata", "Geeta", "Neelam", "Seema", "Arvind", "Harish", "Kailash", "Mahesh", "Narendra", "Ramesh", "Sandeep", "Santosh", "Yogesh", "Karan", "Kunal", "Rohan", "Siddharth", "Alok", "Divya", "Komal", "Neha", "Payal", "Ritu", "Shalini", "Swati", "Tanu", "Varsha"];
+  const LAST_NAMES = ["Kumar", "Sharma", "Varma", "Patil", "Deshmukh", "Joshi", "Gupta", "Verma", "Sen", "Rao", "More", "Shinde", "Waghmare", "Rane", "Kulkarni", "Sawant", "Hegde", "Mandle", "Pereira", "Alvares", "Fernandes", "D'Souza", "Singh", "Yadav", "Chavan", "Apte", "Bapat", "Gore", "Kale", "Modak", "Sane", "Vaze", "Bhide", "Date", "Gadgil", "Kelkar", "Phadke", "Tambe", "Kadam", "Mane", "Pawar", "Suryavanshi", "Thorat", "Bhosale", "Gaekwad", "Nimbalkar", "Salunkhe", "Gaikwad", "Jadhav", "Jagtap", "Mohite", "Shelke"];
+  const GENERAL_SYMPTOMS = [
+    "Mild fever with dry cough and fatigue for 2 days.",
+    "Severe body aches, joint stiffness, and morning chills.",
+    "Indigestion, burning sensation in upper chest, and acid reflux.",
+    "Throat soreness, painful swallowing, and dry cough.",
+    "Swollen knees with persistent pain, difficulty walking.",
+    "Itchy reddish rash on hands and legs, slight burning.",
+    "Occasional mild breathlessness, headache, and fatigue.",
+    "Dry persistent cough with sneezing fits and congestion.",
+    "Fluctuating blood pressure, lightheadedness, and lethargy.",
+    "Moderate stomach cramps with occasional nausea."
+  ];
+
+  // Doctors and facilities
+  const DOCTOR_SEEDS = [
+    { docId: "doc-1", facId: "fac-1", dept: "General OPD", count: 4 },
+    { docId: "doc-2", facId: "fac-1", dept: "Pediatric OPD", count: 4 },
+    { docId: "doc-3", facId: "fac-1", dept: "Maternity OPD", count: 4 },
+    { docId: "doc-4", facId: "fac-2", dept: "General OPD", count: 4 },
+    { docId: "doc-5", facId: "fac-3", dept: "General OPD", count: 4 },
+    { docId: "doc-6", facId: "fac-4", dept: "General OPD", count: 4 }
+  ];
+
+  let patientCounter = 5;
+
+  // 1. Seed assigned patients for each of the 6 doctors (4 per doctor = 24 total)
+  DOCTOR_SEEDS.forEach(seed => {
+    for (let i = 0; i < seed.count; i++) {
+      const idx = patientCounter;
+      const fName = FIRST_NAMES[idx % FIRST_NAMES.length];
+      const lName = LAST_NAMES[(idx * 3) % LAST_NAMES.length];
+      const age = 15 + ((idx * 7) % 65);
+      const gender = (idx % 2 === 0) ? "Male" : "Female";
+      const symptom = GENERAL_SYMPTOMS[(idx * 11) % GENERAL_SYMPTOMS.length];
+      
+      generated.push({
+        id: `pat-${idx}`,
+        name: `${fName} ${lName}`,
+        age,
+        gender,
+        facilityId: seed.facId,
+        department: seed.dept,
+        doctorId: seed.docId,
+        status: "OPD_Pending",
+        ticketNumber: `OPD-${1000 + idx}`,
+        date: "2026-07-15",
+        symptoms: symptom,
+        language: "en",
+        reports: [],
+        prescribedMeds: []
+      });
+      patientCounter++;
+    }
+  });
+
+  // 2. Seed general unassigned waiting patients to make total waiting at each facility be around 30-35
+  const FACILITY_QUEUE_TARGETS = [
+    { facId: "fac-1", targetGeneralCount: 22 }, // 12 doctor-assigned + 22 general = 34 waiting patients. Next booking will be #35.
+    { facId: "fac-2", targetGeneralCount: 28 }, // 4 doctor-assigned + 28 general = 32 waiting patients. Next booking will be #33.
+    { facId: "fac-3", targetGeneralCount: 29 }, // 4 doctor-assigned + 29 general = 33 waiting patients. Next booking will be #34.
+    { facId: "fac-4", targetGeneralCount: 27 }  // 4 doctor-assigned + 27 general = 31 waiting patients. Next booking will be #32.
+  ];
+
+  FACILITY_QUEUE_TARGETS.forEach(target => {
+    for (let i = 0; i < target.targetGeneralCount; i++) {
+      const idx = patientCounter;
+      const fName = FIRST_NAMES[idx % FIRST_NAMES.length];
+      const lName = LAST_NAMES[(idx * 3) % LAST_NAMES.length];
+      const age = 18 + ((idx * 7) % 60);
+      const gender = (idx % 2 === 0) ? "Male" : "Female";
+      const symptom = GENERAL_SYMPTOMS[(idx * 11) % GENERAL_SYMPTOMS.length];
+      
+      generated.push({
+        id: `pat-${idx}`,
+        name: `${fName} ${lName}`,
+        age,
+        gender,
+        facilityId: target.facId,
+        department: "General OPD",
+        doctorId: null,
+        status: "OPD_Pending",
+        ticketNumber: `OPD-${1000 + idx}`,
+        date: "2026-07-15",
+        symptoms: symptom,
+        language: "en",
+        reports: [],
+        prescribedMeds: []
+      });
+      patientCounter++;
+    }
+  });
+
+  return generated;
+};
+
+const BASE_INITIAL_PATIENTS: Patient[] = [
   {
     id: "pat-1",
     name: "Ramesh Kumar",
@@ -422,6 +558,11 @@ const INITIAL_PATIENTS: Patient[] = [
     ],
     prescribedMeds: []
   }
+];
+
+const INITIAL_PATIENTS: Patient[] = [
+  ...BASE_INITIAL_PATIENTS,
+  ...generateMorePatients()
 ];
 
 const INITIAL_AMBULANCES: Ambulance[] = [

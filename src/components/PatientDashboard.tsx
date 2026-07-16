@@ -21,7 +21,8 @@ import {
   Truck,
   X,
   WifiOff,
-  QrCode
+  QrCode,
+  ShieldCheck
 } from "lucide-react";
 import { TRANSLATIONS, Patient, Facility, Doctor } from "../types";
 
@@ -45,6 +46,8 @@ interface PatientDashboardProps {
     doctor: Doctor | null;
   } | null>;
   booking: boolean;
+  patientPhone?: string;
+  patientAbhaId?: string;
 }
 
 export const PatientDashboard: React.FC<PatientDashboardProps> = ({
@@ -53,7 +56,9 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
   doctors,
   language,
   onBookOPD,
-  booking
+  booking,
+  patientPhone,
+  patientAbhaId,
 }) => {
   const t = TRANSLATIONS[language];
 
@@ -551,6 +556,48 @@ export const PatientDashboard: React.FC<PatientDashboardProps> = ({
           <span className="bg-amber-600 font-extrabold text-[9px] px-2 py-0.5 rounded border border-amber-400 shrink-0 uppercase tracking-widest font-mono">
             LOCAL BACKUP
           </span>
+        </div>
+      )}
+
+      {/* PATIENT SESSION AUTHENTICATION STATUS BANNER */}
+      {(patientPhone || patientAbhaId) && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 font-sans shadow-sm animate-fadeIn border-l-4 border-l-indigo-600" id="patient-auth-session-banner">
+          <div className="flex items-center space-x-3.5">
+            <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl">
+              <ShieldCheck className="h-5 w-5 shrink-0" />
+            </div>
+            <div>
+              <h4 className="font-extrabold text-slate-900 text-sm tracking-tight uppercase">
+                {language === "hi" ? "सत्यापित मरीज सत्र" : language === "mr" ? "सत्यापित रुग्ण सत्र" : "Verified Patient Session"}
+              </h4>
+              <div className="text-xs text-slate-500 mt-1 flex flex-wrap items-center gap-1.5 font-medium">
+                <span>{language === "hi" ? "लॉगिन माध्यम:" : language === "mr" ? "लॉगिन माध्यम:" : "Identity Method:"}</span>
+                {patientPhone ? (
+                  <span className="bg-indigo-50 text-indigo-700 px-2.5 py-0.5 rounded-md font-bold font-mono text-[11px] border border-indigo-100">
+                    📞 +91 {patientPhone}
+                  </span>
+                ) : (
+                  <span className="bg-teal-50 text-teal-800 px-2.5 py-0.5 rounded-md font-bold font-mono text-[11px] border border-teal-100">
+                    💳 ABHA: {patientAbhaId}
+                  </span>
+                )}
+                <span className="text-emerald-600 font-extrabold flex items-center gap-1">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  {language === "hi" ? "सक्रिय" : language === "mr" ? "सक्रिय" : "Active & Encrypted"}
+                </span>
+              </div>
+            </div>
+          </div>
+          
+          <div className="text-xs text-slate-400 font-medium sm:text-right">
+            <span>
+              {language === "hi" 
+                ? "आयुष्मान भारत डिजिटल मिशन (ABDM) द्वारा सुरक्षित" 
+                : language === "mr" 
+                ? "आयुष्मान भारत डिजिटल मिशन (ABDM) द्वारे सुरक्षित" 
+                : "Secured under Ayushman Bharat Digital Mission (ABDM)"}
+            </span>
+          </div>
         </div>
       )}
       
